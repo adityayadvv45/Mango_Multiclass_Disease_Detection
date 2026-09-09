@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import {
   Sparkles,
   RefreshCw,
@@ -128,7 +128,7 @@ export const ResultDashboard = ({ image, result, onReset }) => {
 
             <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
               {predicted_diseases.map((dis, idx) => {
-                const colors = getDiseaseColor(dis.disease_id);
+                const colors = getDiseaseColor(dis.disease_id || dis.id);
                 return (
                   <div
                     key={idx}
@@ -136,10 +136,10 @@ export const ResultDashboard = ({ image, result, onReset }) => {
                   >
                     <span className={`w-2 h-2 rounded-full ${colors.bg}`} />
                     <span className={`text-xs font-bold ${colors.text}`}>
-                      {dis.name}
+                      {dis.name || dis.disease}
                     </span>
                     <span className="text-[11px] font-mono text-white font-black bg-slate-800 px-1.5 py-0.5 rounded">
-                      {dis.confidence}%
+                      {dis.confidence || dis.cnn_confidence}%
                     </span>
                   </div>
                 );

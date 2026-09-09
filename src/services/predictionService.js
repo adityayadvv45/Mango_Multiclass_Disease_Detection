@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Real Mango Leaf Disease Detection Service Layer
  * Connects directly to FastAPI backend (POST http://127.0.0.1:8000/predict)
  * with robust multi-disease and bounding box parsing.
@@ -86,8 +86,10 @@ export async function predictMangoLeafDisease(imageSource, onProgressStep) {
   await delay(200);
 
   // Augment with rich botanical disease information from metadata
+  const topDetectedId = data.predicted_diseases?.[0]?.disease_id || data.predicted_diseases?.[0]?.id;
   const diseaseInfo = getDiseaseById(data.disease_id || data.diseaseId) ||
                       getDiseaseByName(data.disease) ||
+                      (topDetectedId ? getDiseaseById(topDetectedId) : null) ||
                       DISEASE_CLASSES[0];
 
   return {
@@ -127,12 +129,12 @@ function generateClientSideDynamicResult(imageSource, sampleDiseaseId) {
     predictedDiseases = [{ name: 'Healthy', confidence: 97.8, disease_id: 'healthy' }];
     detections = [];
   } else if (isMulti) {
-    primaryName = 'Anthracnose';
-    primaryId = 'anthracnose';
+    primaryName = 'Multiple Diseases Detected';
+    primaryId = 'multiple-diseases';
     confidence = 92.4;
     predictedDiseases = [
-      { name: 'Anthracnose', confidence: 92.4, disease_id: 'anthracnose' },
-      { name: 'Powdery Mildew', confidence: 86.8, disease_id: 'powdery-mildew' }
+      { name: 'Anthracnose', disease: 'Anthracnose', confidence: 92.4, disease_id: 'anthracnose', cnn_confidence: 92.4, yolo_confidence: 90.0 },
+      { name: 'Powdery Mildew', disease: 'Powdery Mildew', confidence: 86.8, disease_id: 'powdery-mildew', cnn_confidence: 86.8, yolo_confidence: 85.0 }
     ];
     detections = [
       {
