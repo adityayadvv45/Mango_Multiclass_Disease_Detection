@@ -1,10 +1,11 @@
-﻿import React from 'react';
+import React from 'react';
 import { BarChart3, TrendingUp, Layers } from 'lucide-react';
 
 export const PredictionBreakdown = ({ predictions = [], predictedDiseases = [] }) => {
   if (!predictions || predictions.length === 0) return null;
 
-  const detectedNames = new Set((predictedDiseases || []).map((d) => d.name));
+  const detectedNames = new Set((predictedDiseases || []).map((d) => d.name || d.disease));
+  const isMulti = detectedNames.size > 1;
 
   return (
     <div className="rounded-2xl glass-panel p-6 border border-slate-800 space-y-4">
@@ -16,7 +17,7 @@ export const PredictionBreakdown = ({ predictions = [], predictedDiseases = [] }
           </h4>
         </div>
         <span className="text-[11px] font-mono text-slate-400">
-          Softmax Distribution
+          Model Detection Scores
         </span>
       </div>
 
@@ -27,8 +28,9 @@ export const PredictionBreakdown = ({ predictions = [], predictedDiseases = [] }
       {/* Progress Bars List */}
       <div className="space-y-3.5 pt-1">
         {predictions.map((item, index) => {
-          const isTop = index === 0;
-          const isAlsoDetected = !isTop && detectedNames.has(item.name);
+          const isDetected = detectedNames.has(item.name);
+          const isTop = index === 0 && isDetected;
+          const isAlsoDetected = !isTop && isDetected;
           const confidence = parseFloat(item.confidence) || 0;
 
           return (
@@ -47,7 +49,7 @@ export const PredictionBreakdown = ({ predictions = [], predictedDiseases = [] }
                   </span>
                   {isTop && (
                     <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-semibold">
-                      Primary Match
+                      {isMulti ? "Detected" : "Primary Match"}
                     </span>
                   )}
                   {isAlsoDetected && (

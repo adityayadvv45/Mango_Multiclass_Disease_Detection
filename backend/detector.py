@@ -66,7 +66,7 @@ class YOLOv8Detector:
             return self._detect_with_cv_heuristics(np_rgb, w_img, h_img)
 
     def _detect_with_yolo(self, np_rgb, w_img, h_img):
-        """Runs YOLOv8 bounding box regression and extracts coordinates."""
+        """Runs YOLOv8 bounding box regression and extracts coordinates & class detections."""
         detections = []
         try:
             results = self.yolo_model.predict(np_rgb, conf=0.25, verbose=False)
@@ -76,13 +76,22 @@ class YOLOv8Detector:
                     for box in boxes:
                         xyxy = box.xyxy[0].cpu().numpy().astype(int)
                         conf = float(box.conf[0].cpu().numpy()) * 100.0
+                        cls_id = int(box.cls[0].cpu().numpy()) if box.cls is not None else None
+                        
+                        cls_name = None
+                        if cls_id is not None:
+                            if hasattr(res, "names") and res.names and cls_id in res.names:
+                                cls_name = res.names[cls_id]
+                            elif hasattr(self.yolo_model, "names") and self.yolo_model.names and cls_id in self.yolo_model.names:
+                                cls_name = self.yolo_model.names[cls_id]
+
                         x1 = max(0, min(w_img - 1, int(xyxy[0])))
                         y1 = max(0, min(h_img - 1, int(xyxy[1])))
                         x2 = max(x1 + 1, min(w_img, int(xyxy[2])))
                         y2 = max(y1 + 1, min(h_img, int(xyxy[3])))
                         area = (x2 - x1) * (y2 - y1)
 
-                        detections.append({
+                        det_item = {
                             "bbox": [x1, y1, x2, y2],
                             "relative_bbox": [
                                 round(x1 / w_img, 4),
@@ -92,7 +101,12 @@ class YOLOv8Detector:
                             ],
                             "yolo_confidence": round(conf, 2),
                             "area": int(area)
-                        })
+                        }
+                        if cls_name is not None:
+                            det_item["yolo_class"] = str(cls_name)
+                            det_item["class_id"] = cls_id
+
+                        detections.append(det_item)
         except Exception as e:
             print(f"[YOLO Detector] Detection exception: {e}, falling back to CV localization.")
             return self._detect_with_cv_heuristics(np_rgb, w_img, h_img)
@@ -346,4 +360,4 @@ class YOLOv8Detector:
                     remaining.append(other)
             dets = remaining
 
-        return keep[:6]
+        return keep

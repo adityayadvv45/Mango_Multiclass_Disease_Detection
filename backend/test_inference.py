@@ -102,16 +102,28 @@ def run_diagnostic_tests():
             assert len(result["detections"]) == 0, "Healthy leaf should have 0 localized disease boxes"
         elif dtype == "multi_disease":
             assert len(result["detections"]) >= 2, "Multi-disease leaf must localize at least 2 distinct regions"
-            assert result["is_multiple_diseases"] is True or len(result["predicted_diseases"]) >= 2
+            assert result["is_multiple_diseases"] is True, "Multi-disease specimen must set is_multiple_diseases=True"
+            assert len(result["predicted_diseases"]) >= 2, "Multi-disease specimen must return at least 2 distinct diseases"
+            # Verify all detected diseases are in all_predictions with their real confidence scores
+            detected_names = {d["name"] for d in result["predicted_diseases"]}
+            top_pred_names = {p["name"] for p in result["all_predictions"] if p["confidence"] > 10.0}
+            assert detected_names.issubset(top_pred_names), f"All detected diseases {detected_names} must be in top predictions {top_pred_names}"
+        elif dtype == "quad_multi_disease":
+            assert len(result["detections"]) >= 3, "Quad-pathology leaf must localize at least 3 distinct regions"
+            assert result["is_multiple_diseases"] is True, "Quad-pathology specimen must set is_multiple_diseases=True"
+            assert len(result["predicted_diseases"]) >= 3, "Quad-pathology specimen must return at least 3 distinct diseases"
         elif dtype in ["anthracnose", "powdery_mildew", "bacterial_canker"]:
             assert result["is_healthy"] is False, f"{dtype} should not be marked healthy"
             assert len(result["detections"]) >= 1, f"{dtype} should have localized bounding boxes"
             for d in result["detections"]:
+                assert "disease" in d, "Each detection must contain disease name"
+                assert "confidence" in d, "Each detection must contain confidence"
+                assert "bbox" in d, "Each detection must contain bbox coordinates"
                 assert "cnn_confidence" in d, "Each detection must contain cnn_confidence"
                 assert "yolo_confidence" in d, "Each detection must contain yolo_confidence"
 
     print("\n" + "=" * 70)
-    print("ALL 5 DIAGNOSTIC YOLO + CNN INFERENCE TESTS PASSED WITH 100% ACCURACY!")
+    print("ALL 6 DIAGNOSTIC YOLO + CNN INFERENCE TESTS PASSED WITH 100% ACCURACY!")
     print("=" * 70)
 
 if __name__ == "__main__":

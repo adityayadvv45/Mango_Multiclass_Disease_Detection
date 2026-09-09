@@ -86,6 +86,17 @@ export async function predictMangoLeafDisease(imageSource, onProgressStep) {
   await delay(200);
 
   // Augment with rich botanical disease information from metadata
+  const predictedDiseasesWithInfo = (data.predicted_diseases || []).map((dis) => {
+    const info = getDiseaseById(dis.disease_id || dis.id) || getDiseaseByName(dis.name || dis.disease) || {};
+    return {
+      ...info,
+      ...dis,
+      name: dis.name || dis.disease || info.name,
+      confidence: dis.confidence || dis.cnn_confidence || 0,
+      disease_id: dis.disease_id || dis.id || info.id
+    };
+  });
+
   const topDetectedId = data.predicted_diseases?.[0]?.disease_id || data.predicted_diseases?.[0]?.id;
   const diseaseInfo = getDiseaseById(data.disease_id || data.diseaseId) ||
                       getDiseaseByName(data.disease) ||
@@ -94,6 +105,7 @@ export async function predictMangoLeafDisease(imageSource, onProgressStep) {
 
   return {
     ...data,
+    predicted_diseases: predictedDiseasesWithInfo,
     diseaseInfo,
     timestamp: new Date().toISOString()
   };

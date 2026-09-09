@@ -19,6 +19,7 @@ import { Badge, RiskBadge } from '../common/Badge';
 import { PredictionBreakdown } from './PredictionBreakdown';
 import { DiseaseInfo } from './DiseaseInfo';
 import { RecommendationCard } from './RecommendationCard';
+import { getDiseaseById, getDiseaseByName } from '../../data/diseases';
 
 export const ResultDashboard = ({ image, result, onReset }) => {
   const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
@@ -299,7 +300,7 @@ export const ResultDashboard = ({ image, result, onReset }) => {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4" />
-                  Primary Diagnostic Result
+                  {is_multiple_diseases ? "Multiple Pathologies Detected" : "Diagnostic Result"}
                 </span>
                 <div className="flex items-center gap-2">
                   <Badge variant={isHealthy ? 'success' : 'warning'} size="sm">
@@ -313,18 +314,25 @@ export const ResultDashboard = ({ image, result, onReset }) => {
               <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-3 pt-1">
                 <div>
                   <h3 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-                    {disease}
+                    {is_multiple_diseases && predicted_diseases.length > 0
+                      ? predicted_diseases.map(d => d.name || d.disease).join(" + ")
+                      : disease}
                   </h3>
-                  {diseaseInfo?.scientificName && (
+                  {diseaseInfo?.scientificName && !is_multiple_diseases && (
                     <p className="text-xs sm:text-sm text-slate-400 italic font-mono mt-1">
                       {diseaseInfo.scientificName}
+                    </p>
+                  )}
+                  {is_multiple_diseases && (
+                    <p className="text-xs sm:text-sm text-slate-400 font-mono mt-1">
+                      {predicted_diseases.length} distinct pathologies localized on specimen
                     </p>
                   )}
                 </div>
 
                 <div className="text-left sm:text-right bg-slate-900/80 sm:bg-transparent p-3 sm:p-0 rounded-xl sm:rounded-none border border-slate-800 sm:border-0">
                   <span className="text-xs uppercase font-semibold text-slate-400 block sm:inline">
-                    Estimated Confidence
+                    {is_multiple_diseases ? "Max Confidence" : "Estimated Confidence"}
                   </span>
                   <div className="text-3xl sm:text-4xl font-black text-emerald-400 font-mono">
                     {typeof confidence === 'number' ? confidence.toFixed(1) : confidence}%
@@ -346,11 +354,23 @@ export const ResultDashboard = ({ image, result, onReset }) => {
             predictedDiseases={predicted_diseases}
           />
 
-          {/* Disease Information Card */}
-          <DiseaseInfo disease={diseaseInfo} />
-
-          {/* Recommended Next Steps Card */}
-          <RecommendationCard disease={diseaseInfo} />
+          {/* Disease Information & Recommendations */}
+          {is_multiple_diseases && predicted_diseases.length > 1 ? (
+            predicted_diseases.map((d, i) => {
+              const info = getDiseaseById(d.disease_id || d.id) || getDiseaseByName(d.name || d.disease) || d;
+              return (
+                <div key={d.disease_id || i} className="space-y-6">
+                  <DiseaseInfo disease={info} />
+                  <RecommendationCard disease={info} />
+                </div>
+              );
+            })
+          ) : (
+            <>
+              <DiseaseInfo disease={diseaseInfo} />
+              <RecommendationCard disease={diseaseInfo} />
+            </>
+          )}
 
           {/* Bottom Action Footer */}
           <div className="pt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
