@@ -751,7 +751,7 @@ Predictions should not be considered a substitute for professional agricultural 
 B.Tech Computer Science Engineering
 
 GitHub:
-https://github.com/adityayadvv45
+https://github.com/adityayadvv45/Mango_Multiclass_Disease_Detection
 
 LinkedIn:
 https://www.linkedin.com/in/aditya-yadav-289b132b3
