@@ -221,60 +221,73 @@ class YOLOv8Detector:
             sooty_patches
         )
 
-        min_area = max(200, int(total_pixels * 0.0015))
+        min_area = max(180, int(total_pixels * 0.0012))
         max_area = int(total_pixels * 0.45)
         detections = []
 
+        # Pathology layers to segment independently for precise multi-disease localization
+        pathology_layers = [
+            ("dark_spots_halos", (dark_spots | yellow_halos), (5, 5), (3, 3)),
+            ("powdery_mycelium", powdery_patches, (7, 7), (4, 4)),
+            ("sooty_crust", sooty_patches, (7, 7), (4, 4)),
+            ("brown_necrosis_dieback", brown_necrosis, (7, 7), (4, 4))
+        ]
+
         if HAS_CV2:
-            mask_u8 = (combined_lesion_mask.astype(np.uint8) * 255)
-            kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-            kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (4, 4))
-            cleaned = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel_close)
-            cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel_open)
-            contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            for layer_name, mask_bool, close_k, open_k in pathology_layers:
+                mask_u8 = (mask_bool.astype(np.uint8) * 255)
+                if np.count_nonzero(mask_u8) < min_area:
+                    continue
 
-            for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if min_area <= area <= max_area:
-                    x, y_box, w_box, h_box = cv2.boundingRect(cnt)
-                    # Exclude whole-frame or degenerate background wrappers
-                    if (w_box >= w_img * 0.80 and h_box >= h_img * 0.80) or (w_box * h_box > total_pixels * 0.45):
-                        continue
+                kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, close_k)
+                kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, open_k)
+                cleaned = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel_close)
+                cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel_open)
+                contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-                    pad_x = int(w_box * 0.08)
-                    pad_y = int(h_box * 0.08)
-                    x1 = max(0, x - pad_x)
-                    y1 = max(0, y_box - pad_y)
-                    x2 = min(w_img, x + w_box + pad_x)
-                    y2 = min(h_img, y_box + h_box + pad_y)
+                for cnt in contours:
+                    area = cv2.contourArea(cnt)
+                    if min_area <= area <= max_area:
+                        x, y_box, w_box, h_box = cv2.boundingRect(cnt)
+                        # Exclude whole-frame or degenerate background wrappers
+                        if (w_box >= w_img * 0.85 and h_box >= h_img * 0.85) or (w_box * h_box > total_pixels * 0.50):
+                            continue
+
+                        pad_x = max(2, int(w_box * 0.08))
+                        pad_y = max(2, int(h_box * 0.08))
+                        x1 = max(0, x - pad_x)
+                        y1 = max(0, y_box - pad_y)
+                        x2 = min(w_img, x + w_box + pad_x)
+                        y2 = min(h_img, y_box + h_box + pad_y)
+                        conf = round(min(98.5, max(75.0, 80.0 + (area / total_pixels) * 50.0)), 2)
+
+                        detections.append({
+                            "bbox": [x1, y1, x2, y2],
+                            "relative_bbox": [
+                                round(x1 / w_img, 4),
+                                round(y1 / h_img, 4),
+                                round(x2 / w_img, 4),
+                                round(y2 / h_img, 4)
+                            ],
+                            "yolo_confidence": conf,
+                            "area": int(area)
+                        })
+        else:
+            for layer_name, mask_bool, _, _ in pathology_layers:
+                boxes = self._extract_connected_boxes(mask_bool, min_area, max_area)
+                for bx1, by1, bx2, by2, area in boxes:
                     conf = round(min(98.5, max(75.0, 80.0 + (area / total_pixels) * 50.0)), 2)
-
                     detections.append({
-                        "bbox": [x1, y1, x2, y2],
+                        "bbox": [bx1, by1, bx2, by2],
                         "relative_bbox": [
-                            round(x1 / w_img, 4),
-                            round(y1 / h_img, 4),
-                            round(x2 / w_img, 4),
-                            round(y2 / h_img, 4)
+                            round(bx1 / w_img, 4),
+                            round(by1 / h_img, 4),
+                            round(bx2 / w_img, 4),
+                            round(by2 / h_img, 4)
                         ],
                         "yolo_confidence": conf,
                         "area": int(area)
                     })
-        else:
-            boxes = self._extract_connected_boxes(combined_lesion_mask, min_area, max_area)
-            for bx1, by1, bx2, by2, area in boxes:
-                conf = round(min(98.5, max(75.0, 80.0 + (area / total_pixels) * 50.0)), 2)
-                detections.append({
-                    "bbox": [bx1, by1, bx2, by2],
-                    "relative_bbox": [
-                        round(bx1 / w_img, 4),
-                        round(by1 / h_img, 4),
-                        round(bx2 / w_img, 4),
-                        round(by2 / h_img, 4)
-                    ],
-                    "yolo_confidence": conf,
-                    "area": int(area)
-                })
 
         return self.apply_nms(detections)
 

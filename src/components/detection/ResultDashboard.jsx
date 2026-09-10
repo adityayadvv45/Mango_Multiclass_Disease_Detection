@@ -196,7 +196,7 @@ export const ResultDashboard = ({ image, result, onReset }) => {
                     return (
                       <div
                         key={idx}
-                        className={`absolute border-2 ${colors.border} rounded-lg transition-all duration-300 ${
+                        className={`absolute border-2 ${colors.border} rounded-lg transition-all duration-300 pointer-events-auto cursor-pointer ${
                           isActive ? 'ring-4 ring-emerald-400/40 scale-[1.02] z-20' : 'z-10'
                         } ${colors.bg}`}
                         style={{ left, top, width, height }}

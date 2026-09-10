@@ -18,7 +18,8 @@ The system provides an interactive React-based interface where users can upload 
 ## 🚀 Features
 
 * 🌿 Mango leaf disease detection using Deep Learning
-* 🧠 **CNN-based image classification**
+* 📁 **Trained & Fine-Tuned on Real Field Dataset** (279 real mango leaf photos, 7,400+ pathology crops)
+* 🧠 **CNN-based image classification** (EfficientNet-B0 with PyTorch transfer learning)
 * 🎯 **YOLOv8-based object detection/localization**
 * 🔍 Computer vision processing using **OpenCV**
 * 📊 Confidence-based prediction results
@@ -155,7 +156,41 @@ It can be used for:
 
 ---
 
+# 📂 Real Dataset & Model Training Pipeline
+
+The system is trained and fine-tuned on a **real-world mango leaf dataset** captured under natural agricultural conditions.
+
+### 📊 Dataset Overview
+* **Real Image Collection**: Located in [`Mango Dataset/`](./Mango%20Dataset) containing **279 real mango leaf field photographs** featuring natural illumination, complex backgrounds, and diverse foliar disease stages.
+* **Automated Pathology Lesion Extraction**: Scans raw leaf photographs, detects candidate lesion regions, and extracts standardized high-resolution crops.
+* **Extracted Pathology Dataset (7,475 Total Samples)**:
+  * **Training Split**: 5,290 samples (with real-time data augmentations)
+  * **Validation Split**: 2,185 samples
+  * Organized in `backend/data/mango_crops/` across train and validation sets.
+
+### 📈 Pathology Crop Breakdown
+| Disease Class | Extracted Crops | Description |
+| :--- | :--- | :--- |
+| **Anthracnose** | **2,235 crops** | Dark irregular necrotic spots with chlorotic yellow haloes |
+| **Die Back** | **1,151 crops** | Twig and leaf tip necrosis with marginal browning |
+| **Powdery Mildew** | **521 crops** | Superficial white/gray powdery fungal coating |
+| **Bacterial Canker** | **217 crops** | Water-soaked angular necrotic lesions with raised margins |
+| **Healthy** | **210 crops** | Pristine, unblemished mango foliage |
+| **Sooty Mold** | **28 crops** | Dark superficial mold coating along leaf surfaces |
+
+### 🏋️ CNN Fine-Tuning Pipeline
+The image classifier leverages **Transfer Learning on EfficientNet-B0**:
+* **Architecture**: Pretrained EfficientNet-B0 backbone with custom 8-class classification head & Dropout (0.3)
+* **Optimizer**: AdamW (`lr=2e-4`, `weight_decay=1e-2`)
+* **Learning Rate Policy**: Cosine Annealing LR (`T_max=epochs`, `eta_min=1e-6`)
+* **Loss Function**: Cross-Entropy Loss
+* **Data Augmentations**: Random horizontal/vertical flips, random rotations (±25°), color jitter (brightness, contrast, saturation)
+* **Model Checkpoint**: Saved to [`backend/models/mango_cnn_efficientnet.pth`](./backend/models/mango_cnn_efficientnet.pth)
+
+---
+
 # 🔧 Technology Stack
+
 
 ## Frontend
 
@@ -515,13 +550,14 @@ cd Mango_Multiclass_Disease_Detection
 
 # 🎨 Frontend Setup
 
+From the root directory:
+
 ```bash
-cd frontend
 npm install
 npm run dev
 ```
 
-The Vite development server will start locally.
+The Vite development server will start locally at `http://localhost:5173`.
 
 ---
 
@@ -533,13 +569,13 @@ Open another terminal:
 cd backend
 ```
 
-Create a virtual environment:
+Create and activate a virtual environment:
 
 ### Windows
 
-```bash
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\activate
 ```
 
 ### Linux / macOS
@@ -555,13 +591,42 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Start the API server:
+---
 
-```bash
-uvicorn main:app --reload
+# 🏋️ Model Training on Real Dataset
+
+To extract pathology crops from [`Mango Dataset/`](./Mango%20Dataset) and fine-tune the EfficientNet-B0 model:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe training/train_real_dataset.py
 ```
 
-> Replace `main:app` with the actual module and FastAPI application name if your backend uses a different entry point.
+To run the dual-stage YOLOv8 + CNN inference test suite:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe test_inference.py
+```
+
+---
+
+# 🚀 Start the Backend API Server
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe main.py
+```
+
+Or using Uvicorn:
+
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+* API Health Check: `http://localhost:8000/health`
+* Interactive Swagger Docs: `http://localhost:8000/docs`
+
 
 ---
 
