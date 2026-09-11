@@ -287,6 +287,49 @@ class EfficientNetMangoClassifier:
 
         return results
 
+    def generate_saliency_cam(self, image_input, target_class_idx=None):
+        """
+        Generates Class Activation Map (CAM) saliency heatmap showing where the model
+        focuses for a specific disease class or the predicted top class.
+        Returns a 2D numpy array [0.0, 1.0] representing spatial activation across the image.
+        """
+        if self.model is None:
+            return np.zeros((224, 224), dtype=np.float32)
+
+        tensor = self.preprocess_crop(image_input).unsqueeze(0).to(self.device)
+        self.model.eval()
+
+        with torch.no_grad():
+            features = self.model.features(tensor)  # shape: (1, 1280, H_f, W_f)
+            pooled = self.model.avgpool(features)
+            flattened = torch.flatten(pooled, 1)
+            logits = self.model.classifier(flattened)
+            probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
+
+            if target_class_idx is None:
+                target_class_idx = int(np.argmax(probs))
+
+            # Weights from the linear classifier layer: shape (num_classes, 1280)
+            linear_layer = None
+            for layer in self.model.classifier:
+                if isinstance(layer, nn.Linear):
+                    linear_layer = layer
+                    break
+
+            if linear_layer is None:
+                return np.zeros((224, 224), dtype=np.float32)
+
+            class_weights = linear_layer.weight[target_class_idx].unsqueeze(0).unsqueeze(-1).unsqueeze(-1) # (1, 1280, 1, 1)
+            cam = (features * class_weights).sum(dim=1).squeeze(0) # (H_f, W_f)
+            cam = torch.relu(cam).cpu().numpy()
+
+            if cam.max() > cam.min():
+                cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+            else:
+                cam = np.zeros_like(cam)
+
+        return cam, probs
+
     def _heuristic_fallback(self, crop):
         """Graceful fallback when model weights are not loaded."""
         return {

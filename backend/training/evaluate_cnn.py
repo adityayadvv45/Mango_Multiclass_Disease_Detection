@@ -35,10 +35,10 @@ def evaluate_model(weights_path=None, data_dir=None, device_str=None):
         print(f"Error: Weights file '{weights_path}' does not exist. Please train the model first.")
         return
 
-    _, _, test_loader = create_dataloaders(data_dir, batch_size=32, max_samples_per_class=200)
+    _, _, test_loader = create_dataloaders(data_dir, batch_size=32, max_samples_per_class=None)
     if len(test_loader.dataset) == 0:
         print(f"Note: Evaluating on validation set instead.")
-        _, test_loader, _ = create_dataloaders(data_dir, batch_size=32, max_samples_per_class=200)
+        _, test_loader, _ = create_dataloaders(data_dir, batch_size=32, max_samples_per_class=None)
 
     if len(test_loader.dataset) == 0:
         print("Error: No evaluation samples found.")

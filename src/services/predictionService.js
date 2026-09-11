@@ -491,9 +491,9 @@ async function analyzeImageWithClientSideCV(imageSource, previewUrl, sampleDisea
       } else if (isHealthy && cls.id === 'healthy') {
         conf = primaryConf;
       } else if (cls.id === 'healthy') {
-        conf = 0.6;
+        conf = 0.5;
       } else {
-        conf = Number((Math.random() * 1.8 + 0.4).toFixed(1));
+        conf = 0.5;
       }
       return {
         name: cls.name,

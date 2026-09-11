@@ -17,9 +17,10 @@ except ImportError:
 
 class YOLOv8Detector:
     """
-    Object Detection and Spatial Localization Engine for Mango Leaf Pathologies.
-    Combines YOLOv8 deep spatial candidate detection with high-precision leaf blade
-    segmentation and pathological lesion contour proposals.
+    High-Precision Mango Leaf Lesion Localization Engine.
+    Combines deep convolutional Class Activation Mapping (CAM),
+    morphological pathology segmentation across distinct disease phenotypes,
+    and strict Non-Maximum Suppression (NMS) to precisely locate diseased areas.
     """
     def __init__(self, models_dir=None):
         if models_dir is None:
@@ -33,55 +34,233 @@ class YOLOv8Detector:
         self._load_yolo_model()
 
     def _load_yolo_model(self):
-        """Discovers and initializes YOLOv8 object detection weights if present."""
+        """Discovers custom trained YOLO weights if present."""
         if not os.path.exists(self.models_dir):
             os.makedirs(self.models_dir, exist_ok=True)
             return
 
-        pt_files = glob.glob(os.path.join(self.models_dir, "*.pt"))
+        pt_files = glob.glob(os.path.join(self.models_dir, "*mango*.pt"))
+        if not pt_files:
+            pt_files = glob.glob(os.path.join(self.models_dir, "*.pt"))
+
         if pt_files and HAS_ULTRALYTICS:
             try:
                 self.yolo_model = YOLO(pt_files[0])
-                self.model_version = f"YOLOv8-{os.path.basename(pt_files[0])}"
-                print(f"[YOLO Detector] Loaded YOLOv8 detection weights: {pt_files[0]}")
+                self.model_version = f"YOLO-{os.path.basename(pt_files[0])}"
+                print(f"[YOLO Detector] Initialized detection engine with: {pt_files[0]}")
             except Exception as e:
-                print(f"[YOLO Detector] Error loading YOLO model: {e}")
-        elif pt_files and not HAS_ULTRALYTICS:
-            print("[YOLO Detector] Note: '.pt' weights found but 'ultralytics' package not installed.")
+                print(f"[YOLO Detector] Error initializing YOLO model: {e}")
 
-    def detect_regions(self, np_rgb):
+    def detect_regions(self, np_rgb, cam_heatmaps=None, target_disease=None):
         """
         Detects candidate pathological lesion regions and outputs spatial bounding boxes.
-        Returns list of dicts with keys:
+        Returns a clean list of non-overlapping dicts:
           - 'bbox': [x1, y1, x2, y2]
           - 'relative_bbox': [rx1, ry1, rx2, ry2]
-          - 'yolo_confidence': float (percentage)
+          - 'confidence': float (percentage)
           - 'area': int
         """
         h_img, w_img = np_rgb.shape[:2]
-        cv_detections = self._detect_with_cv_heuristics(np_rgb, w_img, h_img)
+        raw_candidates = []
 
-        # If YOLO model is loaded, incorporate any valid object proposals
+        # 1. CAM Saliency Contours (supports multiple class heatmaps for multi-disease diagnosis)
+        if cam_heatmaps is not None and HAS_CV2:
+            if isinstance(cam_heatmaps, list):
+                for cam in cam_heatmaps:
+                    if cam is not None:
+                        raw_candidates.extend(self._extract_cam_regions(cam, w_img, h_img))
+            elif isinstance(cam_heatmaps, np.ndarray):
+                raw_candidates.extend(self._extract_cam_regions(cam_heatmaps, w_img, h_img))
+
+        # 2. Individual Botanical Pathology Morphological Lesion Masks
+        morph_dets = self._detect_pathology_morphology(np_rgb, w_img, h_img, target_disease)
+        raw_candidates.extend(morph_dets)
+
+        # 3. Optional YOLO proposals
         if self.yolo_model is not None:
-            yolo_dets = self._detect_with_yolo(np_rgb, w_img, h_img)
-            # Combine YOLO proposals with lesion proposals
-            combined = cv_detections + [d for d in yolo_dets if d["area"] < (w_img * h_img * 0.40)]
-            return self.apply_nms(combined, iou_threshold=0.45)
+            raw_candidates.extend(self._detect_with_yolo(np_rgb, w_img, h_img))
 
-        return self.apply_nms(cv_detections, iou_threshold=0.45)
+        if not raw_candidates:
+            return []
 
-    def _detect_with_yolo(self, np_rgb, w_img, h_img):
-        """Runs YOLOv8 bounding box regression and extracts coordinates."""
+        # Apply strict Non-Maximum Suppression (IoU 0.35)
+        clean_detections = self.apply_nms(raw_candidates, iou_threshold=0.35)
+
+        return clean_detections[:8]
+
+    def _extract_cam_regions(self, cam_heatmap, w_img, h_img):
+        """Extracts bounding boxes from neural class activation heatmaps."""
         detections = []
         try:
-            results = self.yolo_model.predict(np_rgb, conf=0.20, verbose=False)
+            cam_resized = cv2.resize(cam_heatmap, (w_img, h_img), interpolation=cv2.INTER_LINEAR)
+            thresh_val = max(0.35, float(np.percentile(cam_resized, 70)))
+            binary_mask = (cam_resized >= thresh_val).astype(np.uint8) * 255
+
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+            cleaned = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+            contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            total_area = w_img * h_img
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if area < (total_area * 0.01) or area > (total_area * 0.65):
+                    continue
+                x, y, w, h = cv2.boundingRect(cnt)
+                if w < 16 or h < 16:
+                    continue
+
+                pad_x = int(w * 0.10)
+                pad_y = int(h * 0.10)
+                x1 = max(0, x - pad_x)
+                y1 = max(0, y - pad_y)
+                x2 = min(w_img, x + w + pad_x)
+                y2 = min(h_img, y + h + pad_y)
+
+                mean_act = float(np.mean(cam_resized[y1:y2, x1:x2])) * 100.0
+
+                detections.append({
+                    "bbox": [x1, y1, x2, y2],
+                    "relative_bbox": [
+                        round(x1 / w_img, 4),
+                        round(y1 / h_img, 4),
+                        round(x2 / w_img, 4),
+                        round(y2 / h_img, 4)
+                    ],
+                    "confidence": round(min(98.0, max(75.0, mean_act)), 1),
+                    "area": int((x2 - x1) * (y2 - y1)),
+                    "source": "cam"
+                })
+        except Exception:
+            pass
+
+        return detections
+
+    def _detect_pathology_morphology(self, np_rgb, w_img, h_img, target_disease=None):
+        """
+        Adaptive multi-phenotype lesion contour extraction.
+        Extracts necrotic, powdery, sooty, and chlorotic patches independently so
+        distinct pathologies across different quadrants are localized separately.
+        """
+        if not HAS_CV2:
+            return []
+
+        total_pixels = h_img * w_img
+        r = np_rgb[:, :, 0].astype(np.float32)
+        g = np_rgb[:, :, 1].astype(np.float32)
+        b = np_rgb[:, :, 2].astype(np.float32)
+        brightness = 0.299 * r + 0.587 * g + 0.114 * b
+
+        img_bgr = cv2.cvtColor(np_rgb, cv2.COLOR_RGB2BGR)
+        img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        h_channel = img_hsv[:, :, 0].astype(np.float32)
+        s_channel = img_hsv[:, :, 1].astype(np.float32)
+        v_channel = img_hsv[:, :, 2].astype(np.float32)
+
+        # 1. Background & Specular Sunlight Glare Filter
+        background_glare = (
+            ((v_channel > 248) & (s_channel < 12)) |
+            ((h_channel >= 95) & (h_channel <= 150) & (s_channel >= 20) & (brightness > 160))
+        )
+
+        # 2. Active Leaf Blade Lamina
+        is_leaf = (
+            ((h_channel >= 10) & (h_channel <= 105) & (s_channel >= 10)) |
+            ((g > r * 0.72) & (g > b * 0.72) & (brightness > 15) & (brightness < 240)) |
+            ((r > 35) & (g > 25) & (brightness > 15) & (brightness < 240) & ~background_glare)
+        ) & ~background_glare
+
+        # 3. Independent Pathology Phenotype Masks
+        # A) Necrotic & Canker Lesions (Dark brown/black cores & halo margins)
+        dark_necrotic = (
+            (((brightness < 88) & (brightness > 5)) |
+             ((r > b + 8) & (r > g - 15) & (brightness < 185) & (s_channel > 15))) &
+            is_leaf & ~background_glare
+        )
+        chlorotic_yellow = (
+            (r > 120) & (g > 95) & (b < 110) & (r > b + 15) &
+            is_leaf & ~background_glare
+        )
+
+        # B) Powdery Mildew (Whitish mycelial patches)
+        powdery = (
+            (brightness > 160) & (brightness <= 248) &
+            (np.abs(r - g) < 24) & (np.abs(g - b) < 24) &
+            (s_channel < 48) & (g > 28) &
+            is_leaf & ~background_glare
+        )
+
+        # C) Sooty Mold (Superficial black crust)
+        sooty = (
+            (brightness < 52) & (brightness > 5) &
+            (s_channel < 65) &
+            is_leaf & ~background_glare
+        )
+
+        phenotype_masks = [
+            ("necrotic", (dark_necrotic | chlorotic_yellow)),
+            ("powdery", powdery),
+            ("sooty", sooty)
+        ]
+
+        min_area = max(90, int(total_pixels * 0.0008))
+        max_area = int(total_pixels * 0.60)
+        detections = []
+
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+        for name, p_mask in phenotype_masks:
+            mask_u8 = (p_mask.astype(np.uint8) * 255)
+            if np.count_nonzero(mask_u8) < min_area:
+                continue
+
+            cleaned = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel_close)
+            cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel_open)
+            contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            for cnt in contours:
+                area = cv2.contourArea(cnt)
+                if min_area <= area <= max_area:
+                    x, y, w, h = cv2.boundingRect(cnt)
+                    if w < 16 or h < 16 or (w >= w_img * 0.90 and h >= h_img * 0.90):
+                        continue
+
+                    pad_x = max(6, int(w * 0.12))
+                    pad_y = max(6, int(h * 0.12))
+                    x1 = max(0, x - pad_x)
+                    y1 = max(0, y - pad_y)
+                    x2 = min(w_img, x + w + pad_x)
+                    y2 = min(h_img, y + h + pad_y)
+
+                    detections.append({
+                        "bbox": [x1, y1, x2, y2],
+                        "relative_bbox": [
+                            round(x1 / w_img, 4),
+                            round(y1 / h_img, 4),
+                            round(x2 / w_img, 4),
+                            round(y2 / h_img, 4)
+                        ],
+                        "confidence": 85.0,
+                        "area": int((x2 - x1) * (y2 - y1)),
+                        "source": f"morphology_{name}"
+                    })
+
+        return detections
+
+    def _detect_with_yolo(self, np_rgb, w_img, h_img):
+        """Runs fine-tuned YOLO bounding box inference."""
+        detections = []
+        if self.yolo_model is None:
+            return detections
+
+        try:
+            results = self.yolo_model.predict(np_rgb, conf=0.25, verbose=False)
             for res in results:
                 boxes = res.boxes
                 if boxes is not None:
                     for box in boxes:
                         xyxy = box.xyxy[0].cpu().numpy().astype(int)
                         conf = float(box.conf[0].cpu().numpy()) * 100.0
-                        cls_id = int(box.cls[0].cpu().numpy()) if box.cls is not None else None
 
                         x1 = max(0, min(w_img - 1, int(xyxy[0])))
                         y1 = max(0, min(h_img - 1, int(xyxy[1])))
@@ -89,154 +268,8 @@ class YOLOv8Detector:
                         y2 = max(y1 + 1, min(h_img, int(xyxy[3])))
                         area = (x2 - x1) * (y2 - y1)
 
-                        # Exclude full-frame bounding boxes
-                        if area >= (w_img * h_img * 0.75):
+                        if area >= (w_img * h_img * 0.70):
                             continue
-
-                        det_item = {
-                            "bbox": [x1, y1, x2, y2],
-                            "relative_bbox": [
-                                round(x1 / w_img, 4),
-                                round(y1 / h_img, 4),
-                                round(x2 / w_img, 4),
-                                round(y2 / h_img, 4)
-                            ],
-                            "yolo_confidence": round(conf, 2),
-                            "area": int(area)
-                        }
-                        detections.append(det_item)
-        except Exception as e:
-            print(f"[YOLO Detector] YOLO forward exception: {e}")
-
-        return detections
-
-    def _detect_with_cv_heuristics(self, np_rgb, w_img, h_img):
-        """
-        Adaptive leaf blade segmentation, multi-spectral anomaly detection,
-        and multi-sector spatial scanning for complete pathology localization.
-        Ensures all distinct diseased regions across the leaf are captured.
-        """
-        total_pixels = h_img * w_img
-        r = np_rgb[:, :, 0].astype(np.float32)
-        g = np_rgb[:, :, 1].astype(np.float32)
-        b = np_rgb[:, :, 2].astype(np.float32)
-
-        brightness = 0.299 * r + 0.587 * g + 0.114 * b
-
-        if HAS_CV2:
-            img_bgr = cv2.cvtColor(np_rgb, cv2.COLOR_RGB2BGR)
-            img_hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-            h_channel = img_hsv[:, :, 0].astype(np.float32)
-            s_channel = img_hsv[:, :, 1].astype(np.float32)
-            v_channel = img_hsv[:, :, 2].astype(np.float32)
-        else:
-            max_c = np.maximum(np.maximum(r, g), b)
-            min_c = np.minimum(np.minimum(r, g), b)
-            delta = max_c - min_c + 1e-5
-            s_channel = (delta / (max_c + 1e-5)) * 255.0
-            v_channel = max_c
-            h_channel = np.zeros_like(r)
-
-        # -----------------------------------------------------------------
-        # 1. Background & Direct Glare Filter
-        # -----------------------------------------------------------------
-        background_glare = (
-            ((v_channel > 248) & (s_channel < 12)) |
-            ((h_channel >= 100) & (h_channel <= 150) & (s_channel >= 15) & (brightness > 160))
-        )
-
-        # -----------------------------------------------------------------
-        # 2. Leaf Lamina Segmentation (Active Mango Foliage)
-        # -----------------------------------------------------------------
-        is_leaf_tissue = (
-            ((h_channel >= 10) & (h_channel <= 105) & (s_channel >= 10)) |
-            ((g > r * 0.75) & (g > b * 0.75) & (brightness > 15) & (brightness < 240)) |
-            ((r > 40) & (g > 30) & (brightness > 15) & (brightness < 240) & ~background_glare)
-        ) & ~background_glare
-
-        # -----------------------------------------------------------------
-        # 3. Comprehensive Pathology Lesion Segmentation
-        # -----------------------------------------------------------------
-        # A) Necrotic / Dark Spots / Bacterial Canker / Anthracnose / Die Back / Cutting Weevil edges:
-        dark_necrotic = (
-            (((brightness < 90) & (brightness > 5)) |
-             ((r > b + 10) & (r > g - 20) & (brightness < 185) & (s_channel > 15))) &
-            is_leaf_tissue &
-            ~background_glare
-        )
-
-        # B) Chlorotic Halos / Yellow-Orange Discolorations / Gall Midge bumps:
-        chlorotic_yellow = (
-            (r > 120) &
-            (g > 95) &
-            (b < 110) &
-            (r > b + 15) &
-            is_leaf_tissue &
-            ~background_glare
-        )
-
-        # C) Powdery Mildew (Whitish/greyish mycelium patches on leaf):
-        powdery_mycelium = (
-            (brightness > 160) &
-            (brightness <= 248) &
-            (np.abs(r - g) < 25) &
-            (np.abs(g - b) < 25) &
-            (s_channel < 50) &
-            (g > 30) &
-            is_leaf_tissue &
-            ~background_glare
-        )
-
-        # D) Sooty Mold (Dark velvet/black crust):
-        sooty_crust = (
-            (brightness < 55) &
-            (brightness > 5) &
-            (s_channel < 65) &
-            is_leaf_tissue &
-            ~background_glare
-        )
-
-        # E) Broad Anomaly Deviation (Any leaf area differing from healthy green baseline):
-        healthy_green = (h_channel >= 30) & (h_channel <= 85) & (s_channel >= 35) & (g > r + 15) & (g > b + 15)
-        foliage_anomaly = is_leaf_tissue & ~healthy_green & ~background_glare
-
-        min_area = max(80, int(total_pixels * 0.0005))
-        max_area = int(total_pixels * 0.60)
-        detections = []
-
-        pathology_masks = [
-            ("necrotic_lesions", (dark_necrotic | chlorotic_yellow), (5, 5), (3, 3)),
-            ("powdery_mycelium", powdery_mycelium, (7, 7), (4, 4)),
-            ("sooty_crust", sooty_crust, (7, 7), (4, 4)),
-            ("foliage_anomaly", foliage_anomaly, (9, 9), (5, 5))
-        ]
-
-        if HAS_CV2:
-            for mask_name, mask_bool, close_k, open_k in pathology_masks:
-                mask_u8 = (mask_bool.astype(np.uint8) * 255)
-                if np.count_nonzero(mask_u8) < min_area:
-                    continue
-
-                kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, close_k)
-                kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, open_k)
-                cleaned = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel_close)
-                cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel_open)
-                contours, _ = cv2.findContours(cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-                for cnt in contours:
-                    area = cv2.contourArea(cnt)
-                    if min_area <= area <= max_area:
-                        x, y_box, w_box, h_box = cv2.boundingRect(cnt)
-                        if w_box >= w_img * 0.90 and h_box >= h_img * 0.90:
-                            continue
-
-                        pad_x = max(6, int(w_box * 0.15))
-                        pad_y = max(6, int(h_box * 0.15))
-                        x1 = max(0, x - pad_x)
-                        y1 = max(0, y_box - pad_y)
-                        x2 = min(w_img, x + w_box + pad_x)
-                        y2 = min(h_img, y_box + h_box + pad_y)
-                        conf = round(min(98.0, max(75.0, 80.0 + (area / total_pixels) * 45.0)), 2)
 
                         detections.append({
                             "bbox": [x1, y1, x2, y2],
@@ -246,55 +279,21 @@ class YOLOv8Detector:
                                 round(x2 / w_img, 4),
                                 round(y2 / h_img, 4)
                             ],
-                            "yolo_confidence": conf,
-                            "area": int(area)
+                            "confidence": round(conf, 1),
+                            "area": int(area),
+                            "source": "yolo"
                         })
+        except Exception:
+            pass
 
-            # -----------------------------------------------------------------
-            # 4. Multi-Sector Foliage Saliency Proposals
-            # When the leaf contains multiple distinct pathological sectors
-            # -----------------------------------------------------------------
-            leaf_mask_u8 = (is_leaf_tissue.astype(np.uint8) * 255)
-            leaf_contours, _ = cv2.findContours(leaf_mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if leaf_contours:
-                main_leaf = max(leaf_contours, key=cv2.contourArea)
-                lx, ly, lw, lh = cv2.boundingRect(main_leaf)
-                if lw >= 100 and lh >= 100:
-                    # Sector proposals across distinct zones of the leaf
-                    sectors = [
-                        (lx, ly, lx + int(lw * 0.55), ly + int(lh * 0.55)),             # Top-Left
-                        (lx + int(lw * 0.45), ly, lx + lw, ly + int(lh * 0.55)),         # Top-Right
-                        (lx, ly + int(lh * 0.45), lx + int(lw * 0.55), ly + lh),         # Bottom-Left
-                        (lx + int(lw * 0.45), ly + int(lh * 0.45), lx + lw, ly + lh),     # Bottom-Right
-                        (lx + int(lw * 0.20), ly + int(lh * 0.20), lx + int(lw * 0.80), ly + int(lh * 0.80)) # Central
-                    ]
-                    for sx1, sy1, sx2, sy2 in sectors:
-                        sec_w = sx2 - sx1
-                        sec_h = sy2 - sy1
-                        if sec_w >= 40 and sec_h >= 40:
-                            # Check if this sector contains anomalous/diseased pixels
-                            sec_anom = foliage_anomaly[sy1:sy2, sx1:sx2]
-                            if np.count_nonzero(sec_anom) > (sec_w * sec_h * 0.04):
-                                detections.append({
-                                    "bbox": [sx1, sy1, sx2, sy2],
-                                    "relative_bbox": [
-                                        round(sx1 / w_img, 4),
-                                        round(sy1 / h_img, 4),
-                                        round(sx2 / w_img, 4),
-                                        round(sy2 / h_img, 4)
-                                    ],
-                                    "yolo_confidence": 82.0,
-                                    "area": int(sec_w * sec_h)
-                                })
+        return detections
 
-        return self.apply_nms(detections, iou_threshold=0.40)
-
-    def apply_nms(self, detections, iou_threshold=0.40):
+    def apply_nms(self, detections, iou_threshold=0.35):
         """Non-Maximum Suppression (NMS) merging overlapping candidate boxes."""
         if not detections:
             return []
 
-        dets = sorted(detections, key=lambda d: d.get("yolo_confidence", 80.0), reverse=True)
+        dets = sorted(detections, key=lambda d: d.get("confidence", 80.0), reverse=True)
         keep = []
 
         while dets:
@@ -321,9 +320,9 @@ class YOLOv8Detector:
                 union = area_a + area_b - inter_area
                 iou = inter_area / max(1, union)
 
+                # If overlap exceeds threshold, suppress
                 if iou < iou_threshold:
                     remaining.append(other)
             dets = remaining
 
         return keep
-

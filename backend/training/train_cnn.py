@@ -81,7 +81,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=8, help="Number of training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Mini-batch size")
     parser.add_argument("--lr", type=float, default=5e-4, help="Initial learning rate")
-    parser.add_argument("--max_samples", type=int, default=200, help="Max images per class (default 200)")
+    parser.add_argument("--max_samples", type=int, default=None, help="Max images per class (default None = all 500)")
     parser.add_argument("--weight_decay", type=float, default=1e-2, help="L2 weight decay regularization")
     parser.add_argument("--save_path", type=str, default=default_save_path, help="Output weights file path")
     parser.add_argument("--device", type=str, default=None, help="Device to use (cuda/cpu)")

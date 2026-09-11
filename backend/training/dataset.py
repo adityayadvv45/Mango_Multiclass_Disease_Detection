@@ -153,10 +153,9 @@ def scan_all_samples(data_dir):
     return class_samples
 
 
-def create_dataloaders(data_dir, batch_size=32, val_ratio=0.15, test_ratio=0.15, max_samples_per_class=200, seed=42, num_workers=0):
+def create_dataloaders(data_dir, batch_size=32, val_ratio=0.15, test_ratio=0.10, max_samples_per_class=None, seed=42, num_workers=0):
     """
-    Constructs train, validation, and test PyTorch DataLoaders with stratified splitting.
-    Caps each class to max_samples_per_class (default 200) for fast, robust training.
+    Constructs train, validation, and test PyTorch DataLoaders with stratified splitting across all samples.
     """
     train_dir = os.path.join(data_dir, "train")
     val_dir = os.path.join(data_dir, "val")
