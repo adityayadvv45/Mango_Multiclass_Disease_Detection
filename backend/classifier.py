@@ -80,10 +80,20 @@ DISEASE_CLASSES = [
     }
 ]
 
+# Class lookups & metadata mappings
 CLASS_NAMES = [d["name"] for d in DISEASE_CLASSES]
 CLASS_IDS = [d["id"] for d in DISEASE_CLASSES]
 CLASS_MAP = {d["id"]: d for d in DISEASE_CLASSES}
+CLASS_MAP["sooty-mould"] = CLASS_MAP["sooty-mold"]
+CLASS_MAP["bacterial_canker"] = CLASS_MAP["bacterial-canker"]
+CLASS_MAP["powdery_mildew"] = CLASS_MAP["powdery-mildew"]
+CLASS_MAP["die_back"] = CLASS_MAP["die-back"]
+CLASS_MAP["gall_midge"] = CLASS_MAP["gall-midge"]
+CLASS_MAP["cutting_weevil"] = CLASS_MAP["cutting-weevil"]
+
 NAME_TO_META = {d["name"]: d for d in DISEASE_CLASSES}
+NAME_TO_META["Sooty Mould"] = NAME_TO_META["Sooty Mold"]
+
 ID_TO_INDEX = {d["id"]: idx for idx, d in enumerate(DISEASE_CLASSES)}
 INDEX_TO_CLASS = {idx: d for idx, d in enumerate(DISEASE_CLASSES)}
 
@@ -107,9 +117,9 @@ def build_efficientnet_classifier(num_classes=8, pretrained=True):
 
 class EfficientNetMangoClassifier:
     """
-    CNN Image Classifier using EfficientNet-B0 transfer learning.
-    Accepts cropped disease regions identified by YOLOv8, classifies
-    pathology across the 8 botanical classes, and produces calibrated probabilities.
+    CNN Image Classifier using fine-tuned EfficientNet-B0 transfer learning.
+    Accepts whole leaf images or localized crop patches, classifies pathology
+    across the 8 botanical classes, and produces calibrated probabilities.
     """
     def __init__(self, weights_path=None, device=None):
         if device is None:
@@ -125,7 +135,7 @@ class EfficientNetMangoClassifier:
 
         self.model = None
         self.is_weights_loaded = False
-        self.model_name = "EfficientNet-B0-TransferLearning"
+        self.model_name = "EfficientNet-B0-Trained"
 
         # ImageNet standardization parameters
         if HAS_TORCHVISION:
@@ -161,14 +171,12 @@ class EfficientNetMangoClassifier:
                 else:
                     self.model.load_state_dict(checkpoint)
                 self.is_weights_loaded = True
-                print(f"[CNN Classifier] Loaded custom fine-tuned weights from: {self.weights_path}")
+                print(f"[CNN Classifier] Loaded newly trained weights from: {self.weights_path}")
             else:
                 print(f"[CNN Classifier] Note: No custom weights found at '{self.weights_path}'.")
-                print("[CNN Classifier] Running with initialized EfficientNet-B0 architecture. Run training to generate fine-tuned weights.")
-                # Load pre-trained weights for feature extractor layers if available
+                print("[CNN Classifier] Initializing with pretrained EfficientNet-B0 backbone. Run training to generate fine-tuned weights.")
                 try:
                     pretrained_base = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
-                    # Copy features
                     self.model.features.load_state_dict(pretrained_base.features.state_dict())
                 except Exception as e:
                     print(f"[CNN Classifier] Pretrained backbone note: {e}")
@@ -196,7 +204,6 @@ class EfficientNetMangoClassifier:
         if self.transform is not None:
             tensor = self.transform(pil_img)
         else:
-            # Manual fallback normalization if torchvision is unavailable
             pil_resized = pil_img.resize((224, 224))
             arr = np.array(pil_resized, dtype=np.float32) / 255.0
             mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -206,160 +213,10 @@ class EfficientNetMangoClassifier:
 
         return tensor
 
-    def _compute_spectral_logits(self, crop):
-        """
-        Computes botanical feature logits when weights are newly initialized or prior to user fine-tuning.
-        Incorporates specular glare rejection, adaptive color spaces, and micro-texture analysis.
-        """
-        if isinstance(crop, np.ndarray):
-            arr = crop
-        elif isinstance(crop, Image.Image):
-            arr = np.array(crop)
-        else:
-            import io
-            arr = np.array(Image.open(io.BytesIO(crop)).convert("RGB"))
-
-        if arr.ndim != 3 or arr.shape[2] < 3:
-            return torch.zeros((1, len(DISEASE_CLASSES)), dtype=torch.float32, device=self.device)
-
-        h_c, w_c = arr.shape[:2]
-        total_px = max(1, h_c * w_c)
-
-        r = arr[:, :, 0].astype(np.float32)
-        g = arr[:, :, 1].astype(np.float32)
-        b = arr[:, :, 2].astype(np.float32)
-        y = 0.299 * r + 0.587 * g + 0.114 * b
-
-        # Compute HSV representation
-        max_c = np.maximum(np.maximum(r, g), b)
-        min_c = np.minimum(np.minimum(r, g), b)
-        delta = max_c - min_c + 1e-5
-        s_channel = (delta / (max_c + 1e-5)) * 255.0
-        v_channel = max_c
-
-        # ---------------------------------------------------------------------
-        # 1. Specular Glare & Ambient Sunlight Detection
-        # Saturated specular reflection or cyan-tinted outdoor sky overexposure
-        # ---------------------------------------------------------------------
-        glare_mask = (
-            ((v_channel > 248) & (s_channel < 10) & (y > 242)) |
-            ((s_channel >= 15) & (s_channel < 60) & (b > r + 8) & (y > 140))
-        )
-        glare_ratio = np.count_nonzero(glare_mask) / total_px
-
-        # ---------------------------------------------------------------------
-        # 2. Leaf Lamina Tissue Segmentation
-        # ---------------------------------------------------------------------
-        leaf_mask = (g > r * 0.70) & (g > b * 0.70) & (y > 20) & ~glare_mask
-        leaf_px = max(1, np.count_nonzero(leaf_mask))
-
-        # ---------------------------------------------------------------------
-        # 3. Pathological Feature Indices
-        # ---------------------------------------------------------------------
-        # A) Necrosis & Desiccation (Bacterial Canker, Anthracnose, Die Back)
-        brown_necrosis = (
-            (r > b + 6) &
-            (r > g - 12) &
-            (y > 30) &
-            (y < 215) &
-            (s_channel > 15) &
-            ~glare_mask
-        )
-        brown_ratio = np.count_nonzero(brown_necrosis) / total_px
-
-        # Dark necrotic spots (canker & anthracnose lesions)
-        dark_spots = (
-            (((y < 75) & (y > 5) & (r >= b - 5)) |
-             ((y < 125) & (y > 15) & (r > b + 6) & (r > g - 10))) &
-            ~glare_mask
-        )
-        dark_ratio = np.count_nonzero(dark_spots) / total_px
-
-        # Chlorotic yellow margins & halos
-        yellow_halos = (
-            (r > 120) &
-            (g > 100) &
-            (b < 110) &
-            (r > b + 15) &
-            (y > 35) &
-            ~glare_mask
-        )
-        yellow_ratio = np.count_nonzero(yellow_halos) / total_px
-
-        # B) Powdery Mildew (Superficial white/grey fungal mycelium strictly on leaf lamina)
-        powdery_patches = (
-            (r > 175) &
-            (g > 175) &
-            (b > 170) &
-            (s_channel < 50) &
-            (y > 160) &
-            ~glare_mask
-        )
-        powdery_ratio = np.count_nonzero(powdery_patches) / total_px
-
-        # C) Sooty Mold (Dark fungal coat masking green lamina)
-        sooty_patches = (
-            (y < 50) &
-            (y > 8) &
-            (s_channel < 60) &
-            (g > 15) &
-            ~glare_mask
-        )
-        sooty_ratio = np.count_nonzero(sooty_patches) / total_px
-
-        # ---------------------------------------------------------------------
-        # 4. Multi-Class Evidence Scoring
-        # ---------------------------------------------------------------------
-        # Bacterial Canker: Angular necrotic lesions + chlorotic yellow margins + dark spots
-        canker_score = dark_ratio * 8.5 + brown_ratio * 6.5 + yellow_ratio * 7.5
-
-        # Anthracnose: Dark circular/irregular necrosis + chlorotic halos
-        anthracnose_score = dark_ratio * 9.0 + brown_ratio * 5.0 + yellow_ratio * 4.0
-
-        # Die Back: Extensive drying/browning across large sections of leaf
-        dieback_score = (brown_ratio * 9.5 + dark_ratio * 3.0) if brown_ratio > 0.22 else (brown_ratio * 3.0)
-
-        # Powdery Mildew: White fungal mycelial coverage
-        powdery_score = powdery_ratio * 12.0
-
-        # Sooty Mold: Black superficial fungal coat
-        sooty_score = sooty_ratio * 10.0
-
-        # Healthy: High chlorophyll, negligible necrosis and zero fungal bloom
-        has_pathology = (
-            (brown_ratio > 0.05) or
-            (dark_ratio > 0.03) or
-            (powdery_ratio > 0.05) or
-            (sooty_ratio > 0.04) or
-            (yellow_ratio > 0.04)
-        )
-        healthy_score = 7.5 if not has_pathology else 0.1
-
-        # Class order:
-        # 0: Healthy
-        # 1: Anthracnose
-        # 2: Bacterial Canker
-        # 3: Powdery Mildew
-        # 4: Sooty Mold
-        # 5: Die Back
-        # 6: Gall Midge
-        # 7: Cutting Weevil
-        logits = np.zeros(len(DISEASE_CLASSES), dtype=np.float32)
-        logits[0] = healthy_score
-        logits[1] = anthracnose_score
-        logits[2] = canker_score
-        logits[3] = powdery_score
-        logits[4] = sooty_score
-        logits[5] = dieback_score
-        logits[6] = 0.4
-        logits[7] = 0.3
-
-        return torch.from_numpy(logits).unsqueeze(0).to(self.device)
-
     def classify_crop(self, crop):
         """
-        Classify a single cropped disease region using EfficientNet-B0 transfer learning
-        fused with calibrated botanical feature priors.
+        Classify a single leaf or cropped lesion region using pure neural network forward pass
+        through the fine-tuned EfficientNet-B0 model.
         """
         tensor = self.preprocess_crop(crop).unsqueeze(0).to(self.device)
 
@@ -368,11 +225,7 @@ class EfficientNetMangoClassifier:
 
         with torch.no_grad():
             logits = self.model(tensor)
-            spectral_logits = self._compute_spectral_logits(crop)
-            # Ensemble fusion: combines deep convolutional feature representations with botanical spectral invariants
-            combined_logits = logits * 0.35 + spectral_logits
-
-            probs = torch.softmax(combined_logits, dim=1).squeeze(0).cpu().numpy()
+            probs = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
 
         top_idx = int(np.argmax(probs))
         top_meta = INDEX_TO_CLASS[top_idx]
@@ -408,13 +261,11 @@ class EfficientNetMangoClassifier:
 
         with torch.no_grad():
             logits_batch = self.model(batch_tensor)
+            probs_batch = torch.softmax(logits_batch, dim=1).cpu().numpy()
 
         results = []
-        for i, crop in enumerate(crops):
-            spectral_logits = self._compute_spectral_logits(crop)
-            combined_logits = logits_batch[i:i+1] * 0.35 + spectral_logits
-            probs = torch.softmax(combined_logits, dim=1).squeeze(0).cpu().numpy()
-
+        for i in range(len(crops)):
+            probs = probs_batch[i]
             top_idx = int(np.argmax(probs))
             top_meta = INDEX_TO_CLASS[top_idx]
             top_conf = round(float(probs[top_idx]) * 100.0, 2)
@@ -437,13 +288,14 @@ class EfficientNetMangoClassifier:
         return results
 
     def _heuristic_fallback(self, crop):
-        """Graceful fallback when model is uninitialized."""
+        """Graceful fallback when model weights are not loaded."""
         return {
-            "disease": "Anthracnose",
-            "disease_id": "anthracnose",
-            "scientific_name": "Colletotrichum gloeosporioides",
-            "category": "Fungal",
-            "risk": "Moderate",
-            "cnn_confidence": 85.0,
-            "distribution": {d["name"]: 12.5 for d in DISEASE_CLASSES}
+            "disease": "Healthy",
+            "disease_id": "healthy",
+            "scientific_name": "Mangifera indica (Healthy)",
+            "category": "Healthy",
+            "risk": "None",
+            "cnn_confidence": 50.0,
+            "distribution": {d["name"]: round(100.0 / len(DISEASE_CLASSES), 2) for d in DISEASE_CLASSES}
         }
+

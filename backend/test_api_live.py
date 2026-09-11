@@ -1,59 +1,60 @@
-﻿import urllib.request
-import json
+import os
+import glob
 import io
-from PIL import Image, ImageDraw
+from fastapi.testclient import TestClient
+from main import app
 
-def create_image(disease_name):
-    img = Image.new("RGB", (600, 450), color=(15, 23, 42))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse([100, 120, 520, 330], fill=(34, 197, 94), outline=(22, 163, 74))
-    draw.line([(100, 280), (520, 130)], fill=(187, 247, 208), width=3)
+client = TestClient(app)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "Mango S data")
 
-    if disease_name == "anthracnose":
-        draw.ellipse([250, 150, 310, 210], fill=(202, 138, 4))
-        draw.ellipse([265, 165, 295, 195], fill=(28, 15, 5))
-    elif disease_name == "multi":
-        draw.ellipse([200, 200, 260, 260], fill=(202, 138, 4))
-        draw.ellipse([215, 215, 245, 245], fill=(28, 15, 5))
-        draw.ellipse([360, 150, 440, 210], fill=(240, 240, 245))
+def test_api_endpoints():
+    print("=" * 70)
+    print("FASTAPI LIVE ENDPOINTS INTEGRATION TEST SUITE")
+    print("=" * 70)
 
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
-    return buf.getvalue()
+    # 1. Health Check
+    health_resp = client.get("/health")
+    assert health_resp.status_code == 200, f"Health check failed: {health_resp.text}"
+    health_data = health_resp.json()
+    print(f"[/health] Status: {health_data['status']}, Model: {health_data['model_version']}, Classes: {health_data['classes_count']}")
 
-def post_file(disease_name):
-    img_bytes = create_image(disease_name)
-    boundary = "Boundary123456789"
-    
-    header = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="file"; filename="sample_{disease_name}.jpg"\r\n'
-        f"Content-Type: image/jpeg\r\n\r\n"
-    ).encode("utf-8")
-    
-    footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
-    body = header + img_bytes + footer
+    # 2. Classes Endpoint
+    classes_resp = client.get("/classes")
+    assert classes_resp.status_code == 200, f"Classes failed: {classes_resp.text}"
+    classes_data = classes_resp.json()
+    print(f"[/classes] Count: {classes_data['count']}, Sample Classes: {[c['name'] for c in classes_data['classes'][:4]]}")
 
-    req = urllib.request.Request(
-        "http://127.0.0.1:8000/predict",
-        data=body,
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}
-    )
-    res = urllib.request.urlopen(req)
-    data = json.loads(res.read().decode("utf-8"))
-    
-    print(f"\n[LIVE API RESULT - {disease_name.upper()}]")
-    print(f"  * Status: {data['status']}")
-    print(f"  * Primary Disease: {data['disease']} ({data['confidence']}%)")
-    print(f"  * Is Multiple Diseases: {data['is_multiple_diseases']}")
-    print(f"  * Predicted Disease List: {[d['name'] for d in data['predicted_diseases']]}")
-    print(f"  * Bounding Box Count: {len(data['detections'])}")
-    for i, box in enumerate(data['detections']):
-        print(f"    - Box {i+1}: {box['disease']} ({box['confidence']}%) @ {box['bbox']}")
-    print(f"  * Inference Time: {data['execution_time_ms']}ms")
+    # 3. Real Image Prediction Tests
+    test_classes = ["Healthy", "Anthracnose", "Powdery Mildew", "Bacterial Canker"]
+    for cls_name in test_classes:
+        img_files = glob.glob(os.path.join(DATA_DIR, cls_name, "*.*"))
+        if not img_files:
+            continue
+        with open(img_files[0], "rb") as f:
+            file_bytes = f.read()
 
-print("=== RUNNING FASTAPI LIVE CLIENT VERIFICATION ===")
-post_file("healthy")
-post_file("anthracnose")
-post_file("multi")
-print("\n=== LIVE API VERIFICATION SUCCESSFUL ===")
+        files = {"file": ("test_leaf.jpg", file_bytes, "image/jpeg")}
+        resp = client.post("/predict", files=files)
+        assert resp.status_code == 200, f"Predict failed for {cls_name}: {resp.text}"
+        data = resp.json()
+
+        print(f"\n[/predict - {cls_name}]")
+        print(f"  * Status: {data['status']}")
+        print(f"  * Disease: {data['disease']} ({data['confidence']}%)")
+        print(f"  * Is Multiple: {data['is_multiple_diseases']}")
+        print(f"  * Detections Count: {len(data['detections'])}")
+        print(f"  * Execution Time: {data['execution_time_ms']}ms")
+
+        if cls_name == "Healthy":
+            assert data["is_healthy"] is True
+            assert len(data["detections"]) == 0
+        else:
+            assert data["is_healthy"] is False
+            assert data["disease"] == cls_name or any(d["name"] == cls_name for d in data["predicted_diseases"])
+
+    print("\n" + "=" * 70)
+    print("ALL FASTAPI LIVE INTEGRATION TESTS PASSED SUCCESSFULLY!")
+    print("=" * 70)
+
+if __name__ == "__main__":
+    test_api_endpoints()

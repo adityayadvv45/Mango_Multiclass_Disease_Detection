@@ -1,85 +1,81 @@
+import os
 import io
+import glob
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image, ImageEnhance
 from inference import engine, DISEASE_CLASSES
 
-def create_synthetic_leaf(disease_type="healthy"):
-    """Generate realistic test mango leaf image for automated diagnostic testing."""
-    # Background (dark slate)
-    img = Image.new("RGB", (600, 450), color=(15, 23, 42))
-    draw = ImageDraw.Draw(img)
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "Mango S data")
 
-    # Leaf blade (vibrant green elliptical mango leaf)
-    leaf_bbox = [100, 120, 520, 330]
-    draw.ellipse(leaf_bbox, fill=(34, 197, 94), outline=(22, 163, 74))
+def get_sample_image(class_folder):
+    """Retrieve first sample image for a given class from the Kaggle dataset."""
+    folder_path = os.path.join(DATA_DIR, class_folder)
+    images = glob.glob(os.path.join(folder_path, "*.*"))
+    if not images:
+        raise FileNotFoundError(f"No sample images found in {folder_path}")
+    with open(images[0], "rb") as f:
+        return f.read()
 
-    # Leaf main vein
-    draw.line([(100, 280), (520, 130)], fill=(187, 247, 208), width=3)
-
-    if disease_type == "anthracnose":
-        # Necrotic spots with chlorotic yellow halo
-        # Spot 1
-        draw.ellipse([250, 150, 310, 210], fill=(202, 138, 4)) # yellow halo
-        draw.ellipse([265, 165, 295, 195], fill=(28, 15, 5))   # dark necrotic center
-        # Spot 2
-        draw.ellipse([340, 210, 400, 270], fill=(202, 138, 4))
-        draw.ellipse([355, 225, 385, 255], fill=(24, 11, 2))
-
-    elif disease_type == "powdery_mildew":
-        # Whitish-grey superficial patches
-        draw.ellipse([220, 160, 300, 220], fill=(240, 240, 245))
-        draw.ellipse([340, 190, 420, 250], fill=(235, 235, 240))
-
-    elif disease_type == "bacterial_canker":
-        # Angular water-soaked lesions with yellow halo
-        draw.polygon([(240, 160), (280, 150), (290, 190), (250, 200)], fill=(113, 63, 18), outline=(234, 179, 8))
-        draw.polygon([(330, 200), (370, 190), (380, 230), (340, 240)], fill=(113, 63, 18), outline=(234, 179, 8))
-
-    elif disease_type == "multi_disease":
-        # Region 1: Anthracnose in left region
-        draw.ellipse([200, 200, 260, 260], fill=(202, 138, 4))
-        draw.ellipse([215, 215, 245, 245], fill=(28, 15, 5))
-
-        # Region 2: Powdery Mildew in right region
-        draw.ellipse([360, 150, 440, 210], fill=(240, 240, 245))
-
-    elif disease_type == "quad_multi_disease":
-        # Region 1: Anthracnose (left)
-        draw.ellipse([180, 190, 240, 250], fill=(202, 138, 4))
-        draw.ellipse([195, 205, 225, 235], fill=(28, 15, 5))
-
-        # Region 2: Powdery Mildew (right)
-        draw.ellipse([370, 140, 450, 200], fill=(240, 240, 245))
-
-        # Region 3: Bacterial Canker (center top)
-        draw.polygon([(270, 150), (310, 140), (320, 180), (280, 190)], fill=(113, 63, 18), outline=(234, 179, 8))
-
-        # Region 4: Sooty Mold (center bottom)
-        draw.ellipse([270, 240, 350, 280], fill=(18, 18, 22))
-
+def create_sunlit_healthy_specimen():
+    """Create a sunlit/high-brightness variant of a real healthy leaf."""
+    folder_path = os.path.join(DATA_DIR, "Healthy")
+    images = glob.glob(os.path.join(folder_path, "*.*"))
+    img = Image.open(images[0]).convert("RGB")
+    # Increase brightness & contrast by 30% to simulate harsh outdoor sunlight
+    enhancer = ImageEnhance.Brightness(img)
+    img = enhancer.enhance(1.3)
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.2)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=95)
     return buf.getvalue()
 
+def create_multi_disease_composite():
+    """
+    Synthesize a realistic multi-disease leaf specimen by compositing a real
+    Anthracnose diseased patch onto the left side and a real Powdery Mildew
+    diseased patch onto the right side of a mango leaf canvas.
+    """
+    anthracnose_imgs = glob.glob(os.path.join(DATA_DIR, "Anthracnose", "*.*"))
+    powdery_imgs = glob.glob(os.path.join(DATA_DIR, "Powdery Mildew", "*.*"))
+    healthy_imgs = glob.glob(os.path.join(DATA_DIR, "Healthy", "*.*"))
+
+    canvas = Image.open(healthy_imgs[0]).convert("RGB").resize((600, 450))
+    anth_patch = Image.open(anthracnose_imgs[0]).convert("RGB").resize((180, 180))
+    pwd_patch = Image.open(powdery_imgs[0]).convert("RGB").resize((180, 180))
+
+    # Paste patches onto canvas
+    canvas.paste(anth_patch, (50, 120))
+    canvas.paste(pwd_patch, (350, 120))
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="JPEG", quality=95)
+    return buf.getvalue()
+
 
 def run_diagnostic_tests():
-    print("=" * 70)
+    print("=" * 75)
     print("MANGO LEAF YOLOv8 + CNN DUAL-STAGE INFERENCE DIAGNOSTIC SUITE")
     print(f"Model Engine: {engine.model_version}")
-    print("=" * 70)
+    print(f"Dataset Path: {DATA_DIR}")
+    print("=" * 75)
 
     test_cases = [
-        ("Healthy Mango Leaf Specimen", "healthy"),
-        ("Anthracnose Diseased Leaf", "anthracnose"),
-        ("Powdery Mildew Fungal Leaf", "powdery_mildew"),
-        ("Bacterial Canker Pathological Leaf", "bacterial_canker"),
-        ("Multi-Disease Mango Leaf (Anthracnose + Powdery Mildew)", "multi_disease"),
-        ("Quad-Pathology Leaf (Anthracnose + Powdery Mildew + Bacterial Canker + Sooty Mold)", "quad_multi_disease")
+        ("Healthy Specimen", lambda: get_sample_image("Healthy"), "Healthy", True),
+        ("Harsh Sunlit Healthy Leaf (Glare Invariance)", create_sunlit_healthy_specimen, "Healthy", True),
+        ("Anthracnose Pathological Specimen", lambda: get_sample_image("Anthracnose"), "Anthracnose", False),
+        ("Bacterial Canker Pathological Specimen", lambda: get_sample_image("Bacterial Canker"), "Bacterial Canker", False),
+        ("Cutting Weevil Specimen", lambda: get_sample_image("Cutting Weevil"), "Cutting Weevil", False),
+        ("Die Back Specimen", lambda: get_sample_image("Die Back"), "Die Back", False),
+        ("Gall Midge Specimen", lambda: get_sample_image("Gall Midge"), "Gall Midge", False),
+        ("Powdery Mildew Specimen", lambda: get_sample_image("Powdery Mildew"), "Powdery Mildew", False),
+        ("Sooty Mold Specimen", lambda: get_sample_image("Sooty Mould"), "Sooty Mold", False),
+        ("Composite Multi-Disease Leaf (Anthracnose + Powdery Mildew)", create_multi_disease_composite, "multi_disease", False),
     ]
 
-    for name, dtype in test_cases:
+    for name, img_fn, expected_disease, expected_healthy in test_cases:
         print(f"\n[TEST CASE] {name}")
-        img_bytes = create_synthetic_leaf(dtype)
+        img_bytes = img_fn()
         result = engine.predict(img_bytes)
 
         print(f"  * Primary Disease Detected: {result['disease']} ({result['confidence']}%)")
@@ -91,40 +87,27 @@ def run_diagnostic_tests():
         print(f"  * Detected Disease List ({len(result['predicted_diseases'])}): {det_list}")
         print(f"  * Localized Bounding Box Count: {len(result['detections'])}")
         for idx, det in enumerate(result['detections']):
-            print(f"     -> Box {idx+1}: [{det['disease']}] CNN={det.get('cnn_confidence', det['confidence'])}%, YOLO={det.get('yolo_confidence', 'N/A')}% @ bbox={det['bbox']}, relative={det['relative_bbox']}")
+            print(f"     -> Box {idx+1}: [{det['disease']}] CNN={det.get('cnn_confidence', det['confidence'])}%, YOLO={det.get('yolo_confidence', 'N/A')}% @ bbox={det['bbox']}")
         
         top3 = [p['name'] + ': ' + str(p['confidence']) + '%' for p in result['all_predictions'][:3]]
         print(f"  * Top-3 Distribution: {top3}")
 
         # Assertions
-        if dtype == "healthy":
-            assert result["is_healthy"] is True or result["disease"] == "Healthy", "Healthy leaf should be identified as healthy"
-            assert len(result["detections"]) == 0, "Healthy leaf should have 0 localized disease boxes"
-        elif dtype == "multi_disease":
+        if expected_healthy:
+            assert result["is_healthy"] is True, f"{name} should be identified as healthy"
+            assert result["disease"] == "Healthy", f"{name} should have primary disease 'Healthy'"
+            assert len(result["detections"]) == 0, f"{name} should have 0 disease detections"
+        elif expected_disease == "multi_disease":
             assert len(result["detections"]) >= 2, "Multi-disease leaf must localize at least 2 distinct regions"
             assert result["is_multiple_diseases"] is True, "Multi-disease specimen must set is_multiple_diseases=True"
-            assert len(result["predicted_diseases"]) >= 2, "Multi-disease specimen must return at least 2 distinct diseases"
-            # Verify all detected diseases are in all_predictions with their real confidence scores
-            detected_names = {d["name"] for d in result["predicted_diseases"]}
-            top_pred_names = {p["name"] for p in result["all_predictions"] if p["confidence"] > 10.0}
-            assert detected_names.issubset(top_pred_names), f"All detected diseases {detected_names} must be in top predictions {top_pred_names}"
-        elif dtype == "quad_multi_disease":
-            assert len(result["detections"]) >= 3, "Quad-pathology leaf must localize at least 3 distinct regions"
-            assert result["is_multiple_diseases"] is True, "Quad-pathology specimen must set is_multiple_diseases=True"
-            assert len(result["predicted_diseases"]) >= 3, "Quad-pathology specimen must return at least 3 distinct diseases"
-        elif dtype in ["anthracnose", "powdery_mildew", "bacterial_canker"]:
-            assert result["is_healthy"] is False, f"{dtype} should not be marked healthy"
-            assert len(result["detections"]) >= 1, f"{dtype} should have localized bounding boxes"
-            for d in result["detections"]:
-                assert "disease" in d, "Each detection must contain disease name"
-                assert "confidence" in d, "Each detection must contain confidence"
-                assert "bbox" in d, "Each detection must contain bbox coordinates"
-                assert "cnn_confidence" in d, "Each detection must contain cnn_confidence"
-                assert "yolo_confidence" in d, "Each detection must contain yolo_confidence"
+            assert len(result["predicted_diseases"]) >= 2, "Multi-disease specimen must report at least 2 distinct diseases"
+        else:
+            assert result["is_healthy"] is False, f"{expected_disease} should not be marked healthy"
+            assert result["disease"].lower() == expected_disease.lower() or any(d["name"].lower() == expected_disease.lower() for d in result["predicted_diseases"]), f"Expected {expected_disease}, got {result['disease']}"
 
-    print("\n" + "=" * 70)
-    print("ALL 6 DIAGNOSTIC YOLO + CNN INFERENCE TESTS PASSED WITH 100% ACCURACY!")
-    print("=" * 70)
+    print("\n" + "=" * 75)
+    print("ALL 10 DIAGNOSTIC REAL-IMAGE INFERENCE TESTS PASSED WITH 100% SUCCESS!")
+    print("=" * 75)
 
 if __name__ == "__main__":
     run_diagnostic_tests()

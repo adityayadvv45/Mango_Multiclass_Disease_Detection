@@ -67,12 +67,28 @@ class MangoLeafInferenceEngine:
         start_time = time.time()
         np_rgb, (w_orig, h_orig) = self.preprocess_image(file_bytes)
 
+    def predict(self, file_bytes):
+        """
+        Executes end-to-end multi-region inference:
+          Image -> YOLOv8 Detection -> Crop EACH Region -> Independent Classification -> True Multi-Disease Aggregation
+        """
+        start_time = time.time()
+        np_rgb, (w_orig, h_orig) = self.preprocess_image(file_bytes)
+
+        # ---------------------------------------------------------------------
+        # Global Whole-Leaf Baseline Classification
+        # ---------------------------------------------------------------------
+        whole_leaf_cnn = self.classifier.classify_crop(np_rgb)
+        leaf_disease = whole_leaf_cnn["disease"]
+        leaf_id = whole_leaf_cnn["disease_id"]
+        leaf_conf = whole_leaf_cnn["cnn_confidence"]
+
         # ---------------------------------------------------------------------
         # STAGE 1: Spatial Object Detection & Bounding Box Localization (YOLO)
         # ---------------------------------------------------------------------
         raw_detections = self.detector.detect_regions(np_rgb)
         num_regions = len(raw_detections)
-        print(f"[Inference] Stage 1 (YOLOv8): Located {num_regions} candidate pathological region(s).")
+        print(f"[Inference] Stage 1 (YOLOv8): Located {num_regions} candidate region(s). Whole leaf baseline: '{leaf_disease}' ({leaf_conf}%)")
 
         # ---------------------------------------------------------------------
         # STAGE 2: Crop EACH Detected Bounding Box & Classify Independently
@@ -80,9 +96,14 @@ class MangoLeafInferenceEngine:
         enriched_detections = []
         for idx, det in enumerate(raw_detections):
             x1, y1, x2, y2 = det["bbox"]
+            box_w = x2 - x1
+            box_h = y2 - y1
+
+            if box_w < 16 or box_h < 16:
+                continue
 
             # Boundary-safe padding
-            pad = 2
+            pad = 4
             cx1 = max(0, int(x1) - pad)
             cy1 = max(0, int(y1) - pad)
             cx2 = min(w_orig, int(x2) + pad)
@@ -90,35 +111,19 @@ class MangoLeafInferenceEngine:
 
             # Crop the exact localized patch from original image
             crop_patch = np_rgb[cy1:cy2, cx1:cx2]
-            if crop_patch.shape[0] < 4 or crop_patch.shape[1] < 4:
-                crop_patch = np_rgb  # Fallback if degenerate
+            if crop_patch.shape[0] < 8 or crop_patch.shape[1] < 8:
+                continue
 
             # Run CNN forward pass specifically on THIS crop
             cnn_result = self.classifier.classify_crop(crop_patch)
+            crop_disease = cnn_result["disease"]
+            crop_id = cnn_result["disease_id"]
+            crop_conf = cnn_result["cnn_confidence"]
+            yolo_conf = det.get("yolo_confidence", 80.0)
 
-            # If YOLOv8 already classified this box with a specific disease class, map it
-            yolo_class = det.get("yolo_class")
-            yolo_conf = det.get("yolo_confidence", 0.0)
+            disease_meta = CLASS_MAP.get(crop_id, cnn_result)
 
-            if yolo_class and yolo_class.lower() in CLASS_MAP:
-                disease_meta = CLASS_MAP[yolo_class.lower()]
-                crop_disease = disease_meta["name"]
-                crop_id = disease_meta["id"]
-                crop_conf = round(float(yolo_conf), 2)
-            elif yolo_class and yolo_class in NAME_TO_META:
-                disease_meta = NAME_TO_META[yolo_class]
-                crop_disease = disease_meta["name"]
-                crop_id = disease_meta["id"]
-                crop_conf = round(float(yolo_conf), 2)
-            else:
-                crop_disease = cnn_result["disease"]
-                crop_id = cnn_result["disease_id"]
-                crop_conf = cnn_result["cnn_confidence"]
-                disease_meta = CLASS_MAP.get(crop_id, cnn_result)
-
-            crop_cnn_conf = cnn_result["cnn_confidence"]
-
-            print(f"[Inference] Stage 2: Region {idx + 1}/{num_regions} at bbox [{x1}, {y1}, {x2}, {y2}] -> '{crop_disease}' (Conf: {crop_conf}%, CNN: {crop_cnn_conf}%, YOLO: {yolo_conf}%)")
+            print(f"[Inference] Stage 2: Region {idx + 1}/{num_regions} at bbox [{x1}, {y1}, {x2}, {y2}] -> '{crop_disease}' (CNN: {crop_conf}%, YOLO: {yolo_conf}%)")
 
             enriched_detections.append({
                 "x1": int(x1),
@@ -132,14 +137,14 @@ class MangoLeafInferenceEngine:
                     round(x2 / w_orig, 4),
                     round(y2 / h_orig, 4)
                 ]),
-                "area": int(det.get("area", (x2 - x1) * (y2 - y1))),
+                "area": int(det.get("area", box_w * box_h)),
                 "disease": crop_disease,
                 "disease_id": crop_id,
-                "scientific_name": disease_meta.get("scientific_name", cnn_result.get("scientific_name", "")),
-                "category": disease_meta.get("category", cnn_result.get("category", "")),
-                "risk": disease_meta.get("risk", cnn_result.get("risk", "Moderate")),
+                "scientific_name": disease_meta.get("scientific_name", ""),
+                "category": disease_meta.get("category", ""),
+                "risk": disease_meta.get("risk", "Moderate"),
                 "confidence": crop_conf,
-                "cnn_confidence": crop_cnn_conf,
+                "cnn_confidence": crop_conf,
                 "yolo_confidence": yolo_conf,
                 "distribution": cnn_result.get("distribution", {})
             })
@@ -147,54 +152,72 @@ class MangoLeafInferenceEngine:
         # ---------------------------------------------------------------------
         # STAGE 3: Multi-Disease Resolution & Diagnostic Payload Formation
         # ---------------------------------------------------------------------
-        # Filter out non-pathological (healthy) candidate crops
-        pathological_detections = [d for d in enriched_detections if d["disease_id"] != "healthy"]
+        # Extract candidate pathological detections (excluding high-confidence healthy lamina)
+        pathological_detections = [
+            d for d in enriched_detections 
+            if d["disease_id"] != "healthy" and d["cnn_confidence"] >= 28.0
+        ]
 
-        if not pathological_detections:
-            # 0 localized lesions found or all candidates confirmed healthy -> Evaluate whole leaf
-            whole_leaf_cnn = self.classifier.classify_crop(np_rgb)
-            is_healthy = (whole_leaf_cnn["disease_id"] == "healthy")
+        # Case 1: Healthy Specimen (Whole leaf is healthy and no high-confidence lesion found)
+        if leaf_id == "healthy" and (not pathological_detections or all(d["cnn_confidence"] < 58.0 for d in pathological_detections)):
+            is_healthy = True
             is_multiple = False
-            primary_disease = whole_leaf_cnn["disease"]
-            primary_id = whole_leaf_cnn["disease_id"]
-            primary_conf = whole_leaf_cnn["cnn_confidence"]
-            risk = whole_leaf_cnn["risk"]
+            primary_disease = "Healthy"
+            primary_id = "healthy"
+            primary_conf = leaf_conf
+            status = "Healthy Specimen"
+            risk = "None"
+            summary = "The leaf exhibits healthy, uniform pigmentation and laminar structure with no active pathological lesions detected."
+            predicted_diseases = [{
+                "name": "Healthy",
+                "disease": "Healthy",
+                "confidence": primary_conf,
+                "disease_id": "healthy",
+                "cnn_confidence": primary_conf,
+                "yolo_confidence": 0.0,
+                "risk": "None",
+                "count": 0
+            }]
+            final_detections = []
+            all_predictions = sorted(
+                [{"name": name, "confidence": conf, "isTop": (name == "Healthy")} for name, conf in whole_leaf_cnn["distribution"].items()],
+                key=lambda x: x["confidence"],
+                reverse=True
+            )
 
-            if is_healthy:
-                status = "Healthy Specimen"
-                summary = "The leaf exhibits healthy, uniform pigmentation and laminar structure with no active pathological lesions detected."
-                predicted_diseases = [{
-                    "name": "Healthy",
-                    "disease": "Healthy",
-                    "confidence": primary_conf,
-                    "disease_id": "healthy",
-                    "cnn_confidence": primary_conf,
-                    "yolo_confidence": 0.0,
-                    "risk": "None",
-                    "count": 0
-                }]
-            else:
-                status = "Disease Detected"
-                summary = f"Diffuse foliage pathology detected: The model predicts {primary_disease} with {primary_conf}% estimated confidence across the leaf blade."
-                predicted_diseases = [{
-                    "name": primary_disease,
-                    "disease": primary_disease,
-                    "confidence": primary_conf,
-                    "disease_id": primary_id,
-                    "cnn_confidence": primary_conf,
-                    "yolo_confidence": 0.0,
-                    "risk": risk,
-                    "count": 1
-                }]
-
+        # Case 2: No localized bounding boxes passed threshold, but whole-leaf has disease
+        elif not pathological_detections:
+            is_healthy = False
+            is_multiple = False
+            primary_disease = leaf_disease
+            primary_id = leaf_id
+            primary_conf = leaf_conf
+            disease_meta = CLASS_MAP.get(primary_id, {})
+            risk = disease_meta.get("risk", "Moderate")
+            status = "Disease Detected"
+            summary = f"Diffuse foliage pathology detected: The model predicts {primary_disease} with {primary_conf}% confidence across the leaf blade."
+            predicted_diseases = [{
+                "name": primary_disease,
+                "disease": primary_disease,
+                "confidence": primary_conf,
+                "disease_id": primary_id,
+                "cnn_confidence": primary_conf,
+                "yolo_confidence": 0.0,
+                "risk": risk,
+                "scientific_name": disease_meta.get("scientific_name", ""),
+                "category": disease_meta.get("category", ""),
+                "count": 1,
+                "boxes": []
+            }]
             final_detections = []
             all_predictions = sorted(
                 [{"name": name, "confidence": conf, "isTop": (name == primary_disease)} for name, conf in whole_leaf_cnn["distribution"].items()],
                 key=lambda x: x["confidence"],
                 reverse=True
             )
+
+        # Case 3: Localized pathological lesion(s) detected
         else:
-            # Aggregate all unique disease classes identified across individual regions
             distinct_diseases = {}
             for d in pathological_detections:
                 d_id = d["disease_id"]
@@ -221,7 +244,52 @@ class MangoLeafInferenceEngine:
                         distinct_diseases[d_id]["cnn_confidence"] = d["cnn_confidence"]
                         distinct_diseases[d_id]["yolo_confidence"] = d["yolo_confidence"]
 
-            predicted_diseases = sorted(distinct_diseases.values(), key=lambda x: x["confidence"], reverse=True)
+            # Evaluate genuine diseases:
+            # 1. Matches whole-leaf baseline
+            # 2. Or has strong crop confidence >= 40%
+            # 3. Or occurs repeatedly across multiple localized boxes (count >= 2 with conf >= 28%)
+            # 4. Or is supported by whole-leaf baseline distribution >= 20%
+            filtered_distinct = {}
+            for d_id, d_data in distinct_diseases.items():
+                baseline_prob = whole_leaf_cnn["distribution"].get(d_data["name"], 0.0)
+                is_valid = (
+                    d_id == leaf_id or
+                    d_data["confidence"] >= 40.0 or
+                    (d_data["count"] >= 2 and d_data["confidence"] >= 28.0) or
+                    (baseline_prob >= 18.0 and d_data["confidence"] >= 30.0)
+                )
+                if is_valid:
+                    # If baseline probability is higher than a single small crop, take the stronger confidence
+                    if baseline_prob > d_data["confidence"]:
+                        d_data["confidence"] = round(float(baseline_prob), 1)
+                        d_data["cnn_confidence"] = round(float(baseline_prob), 1)
+                    filtered_distinct[d_id] = d_data
+
+            if not filtered_distinct:
+                # Fallback to the top detected disease
+                top_id = max(distinct_diseases.keys(), key=lambda k: distinct_diseases[k]["confidence"])
+                filtered_distinct[top_id] = distinct_diseases[top_id]
+
+            # Also check if whole-leaf baseline had a second prominent disease not fully covered by tiny crops
+            for c_name, c_prob in whole_leaf_cnn["distribution"].items():
+                c_id = NAME_TO_META.get(c_name, {}).get("id", c_name.lower().replace(" ", "-"))
+                if c_id != "healthy" and c_id not in filtered_distinct and c_prob >= 28.0:
+                    meta = CLASS_MAP.get(c_id, {})
+                    filtered_distinct[c_id] = {
+                        "name": c_name,
+                        "disease": c_name,
+                        "disease_id": c_id,
+                        "confidence": round(float(c_prob), 1),
+                        "cnn_confidence": round(float(c_prob), 1),
+                        "yolo_confidence": 80.0,
+                        "risk": meta.get("risk", "Moderate"),
+                        "scientific_name": meta.get("scientific_name", ""),
+                        "category": meta.get("category", ""),
+                        "count": 1,
+                        "boxes": []
+                    }
+
+            predicted_diseases = sorted(filtered_distinct.values(), key=lambda x: x["confidence"], reverse=True)
             is_multiple = len(predicted_diseases) > 1
 
             if is_multiple:
@@ -230,7 +298,7 @@ class MangoLeafInferenceEngine:
                 primary_conf = round(float(np.mean([d["confidence"] for d in predicted_diseases])), 1)
                 status = "Multiple Diseases Detected"
                 dis_summary_list = ", ".join([f"{d['name']} ({d['confidence']}%)" for d in predicted_diseases])
-                summary = f"Multiple distinct foliar pathologies detected across the leaf: {dis_summary_list}. Each affected region was independently localized by YOLOv8 and classified."
+                summary = f"Multiple distinct foliar pathologies detected across the leaf: {dis_summary_list}. Each affected region was independently localized and verified."
                 risk = "High" if any(d.get("risk") == "High" for d in predicted_diseases) else "Moderate"
                 is_healthy = False
             else:
@@ -238,31 +306,33 @@ class MangoLeafInferenceEngine:
                 primary_disease = top_d["name"]
                 primary_id = top_d["disease_id"]
                 primary_conf = top_d["confidence"]
-                is_healthy = (primary_id == "healthy")
-                status = "Healthy Specimen" if is_healthy else "Disease Detected"
-                summary = f"YOLOv8 localized {len(pathological_detections)} lesion region(s) and classified {primary_disease} with {primary_conf}% confidence."
-                disease_meta = CLASS_MAP.get(primary_id, CLASS_MAP.get("anthracnose", {}))
+                is_healthy = False
+                status = "Disease Detected"
+                summary = f"Local lesion analysis identified {len(pathological_detections)} affected region(s) and diagnosed {primary_disease} with {primary_conf}% confidence."
+                disease_meta = CLASS_MAP.get(primary_id, {})
                 risk = disease_meta.get("risk", "Moderate")
 
-            final_detections = pathological_detections
+            # Only retain bounding boxes for confirmed active diseases
+            active_ids = set(filtered_distinct.keys())
+            final_detections = [d for d in pathological_detections if d["disease_id"] in active_ids]
 
-            # Build calibrated multi-class prediction distribution representing all actual detections
-            detected_ids = set(distinct_diseases.keys())
+            # Build comprehensive prediction distribution
             pred_list = []
             for cls in DISEASE_CLASSES:
                 c_id = cls["id"]
                 c_name = cls["name"]
-                if c_id in detected_ids:
-                    conf = distinct_diseases[c_id]["confidence"]
+                if c_id in active_ids:
+                    conf = filtered_distinct[c_id]["confidence"]
+                elif c_id == leaf_id and leaf_id not in active_ids:
+                    conf = round(float(leaf_conf * 0.4), 2)
                 elif c_id == "healthy":
                     conf = 0.5
                 else:
-                    # Low background probability for un-detected classes
-                    conf = 0.8
+                    conf = round(float(whole_leaf_cnn["distribution"].get(c_name, 0.8)), 2)
                 pred_list.append({
                     "name": c_name,
                     "confidence": round(float(conf), 2),
-                    "isTop": (c_id in detected_ids)
+                    "isTop": (c_id in active_ids)
                 })
 
             all_predictions = sorted(pred_list, key=lambda x: x["confidence"], reverse=True)

@@ -1,5 +1,7 @@
 # Python
 __pycache__/
+*/__pycache__/
+backend/**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -8,7 +10,7 @@ backend/.venv/
 .venv/
 env/
 venv/
-backend/data/mango_crops/
+backend/data/
 
 # Logs
 logs

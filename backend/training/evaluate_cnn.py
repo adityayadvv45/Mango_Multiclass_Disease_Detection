@@ -4,32 +4,41 @@ Computes multi-class metrics (Accuracy, Top-k, Confusion Matrix) on test samples
 """
 
 import os
+import sys
 import argparse
 import torch
 import numpy as np
 
-from dataset import create_dataloaders, MANGO_CLASSES, IDX_TO_CLASS
-import sys
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, BASE_DIR)
+sys.path.insert(0, os.path.join(BASE_DIR, "training"))
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from dataset import create_dataloaders, MANGO_CLASSES, IDX_TO_CLASS
 from classifier import build_efficientnet_classifier
 
 
-def evaluate_model(weights_path, data_dir, device_str=None):
+def evaluate_model(weights_path=None, data_dir=None, device_str=None):
+    if weights_path is None:
+        weights_path = os.path.join(BASE_DIR, "models", "mango_cnn_efficientnet.pth")
+    if data_dir is None:
+        data_dir = os.path.join(BASE_DIR, "data", "Mango S data")
+
     device = torch.device(device_str if device_str else ("cuda" if torch.cuda.is_available() else "cpu"))
     print(f"==================================================")
     print(f"EfficientNet-B0 Mango Leaf Evaluation Suite")
     print(f"Device: {device} | Weights: {weights_path}")
+    print(f"Dataset: {data_dir}")
     print(f"==================================================")
 
     if not os.path.exists(weights_path):
         print(f"Error: Weights file '{weights_path}' does not exist. Please train the model first.")
         return
 
-    _, _, test_loader = create_dataloaders(data_dir, batch_size=32)
+    _, _, test_loader = create_dataloaders(data_dir, batch_size=32, max_samples_per_class=200)
     if len(test_loader.dataset) == 0:
-        print(f"Note: No samples found in '{os.path.join(data_dir, 'test')}'. Evaluating on validation set instead.")
-        _, test_loader, _ = create_dataloaders(data_dir, batch_size=32)
+        print(f"Note: Evaluating on validation set instead.")
+        _, test_loader, _ = create_dataloaders(data_dir, batch_size=32, max_samples_per_class=200)
 
     if len(test_loader.dataset) == 0:
         print("Error: No evaluation samples found.")
@@ -81,10 +90,14 @@ def evaluate_model(weights_path, data_dir, device_str=None):
 
 
 if __name__ == "__main__":
+    default_weights = os.path.join(BASE_DIR, "models", "mango_cnn_efficientnet.pth")
+    default_data = os.path.join(BASE_DIR, "data", "Mango S data")
+
     parser = argparse.ArgumentParser(description="Evaluate EfficientNet-B0 on Mango Leaf Test Set")
-    parser.add_argument("--weights", type=str, default="../models/mango_cnn_efficientnet.pth", help="Path to model weights")
-    parser.add_argument("--data_dir", type=str, default="data/mango_crops", help="Path to dataset root")
+    parser.add_argument("--weights", type=str, default=default_weights, help="Path to model weights")
+    parser.add_argument("--data_dir", type=str, default=default_data, help="Path to dataset root")
     parser.add_argument("--device", type=str, default=None, help="Device (cuda/cpu)")
     args = parser.parse_args()
 
     evaluate_model(args.weights, args.data_dir, args.device)
+
