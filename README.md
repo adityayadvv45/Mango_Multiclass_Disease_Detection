@@ -8,6 +8,9 @@ The system provides an interactive React-based interface where users can upload 
 
 ## 🌐 Live Deployments
 
+🖥️ **Live **  https://mango-multiclass-disease-dectection.netlify.app/
+
+
 * 🖥️ **Live Web Application (Frontend)**: [https://mango-multiclass-disease-dectection.netlify.app/](https://mango-multiclass-disease-dectection.netlify.app/)
 * ⚙️ **Live AI REST API (Backend)**: [https://mango-multiclass-disease-detection.onrender.com/](https://mango-multiclass-disease-detection.onrender.com/)
 * 📚 **API Interactive Swagger Docs**: [https://mango-multiclass-disease-detection.onrender.com/docs](https://mango-multiclass-disease-detection.onrender.com/docs)
