@@ -1,4 +1,4 @@
-# 🥭 Mango Leaf Multiple Disease Detection
+# 🥭 Mango Leaf Multiple Disease Detection 
 
 An AI-powered web application for detecting and analyzing diseases present on mango leaves using **Deep Learning, Computer Vision, CNN, and YOLOv8**.
 
