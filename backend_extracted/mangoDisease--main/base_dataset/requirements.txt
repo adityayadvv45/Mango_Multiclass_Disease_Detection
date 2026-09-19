@@ -1,0 +1,15 @@
+--extra-index-url https://download.pytorch.org/whl/cu130
+torch
+torchvision
+streamlit
+opencv-python-headless
+numpy
+matplotlib
+seaborn
+requests
+pillow
+grad-cam
+scikit-learn
+pandas
+plotly
+pytest
