@@ -274,3 +274,12 @@ plt.show()
 
 print("✅ Saved 'segmentation_pipeline_demo.png' (300 DPI)")
 ```
+
+---
+
+## 🚀 How to Run in Google Colab
+
+1. Open [Google Colab](https://colab.research.google.com).
+2. **Cell 1**: Copy **PART 1** (`CNN Charts`) and press `Shift + Enter` $\rightarrow$ plots all CNN charts and saves `cnn_research_charts.png` (300 DPI).
+3. **Cell 2**: Copy **PART 2** (`YOLOv8 Charts`) and press `Shift + Enter` $\rightarrow$ plots all YOLOv8 charts and saves `yolo_research_charts.png` (300 DPI).
+4. **Cell 3**: Copy **PART 3** (`Leaf Segmentation Demo`) and press `Shift + Enter` $\rightarrow$ plots the Leaf Segmentation pipeline and saves `segmentation_pipeline_demo.png` (300 DPI).
