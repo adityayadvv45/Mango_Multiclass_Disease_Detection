@@ -1,22 +1,272 @@
-# 🔬 Deep Learning Model Implementations & Architectural Specifications
+# 🔬 Deep Learning Model Implementations, Architectural Specifications & Visual Benchmarks
 
-> **Research Paper Code Artifact**  
+> **Research Paper Code & Visual Artifact**  
 > **Project**: Real-Time Multi-Pathology Mango Leaf Disease Detection, Blade Segmentation & Lesion Localization  
 > **Repository**: [Mango_Multiclass_Disease_Detection](https://github.com/adityayadvv45/Mango_Multiclass_Disease_Detection)
 
 ---
 
 ## 📑 Table of Contents
-1. [Mathematical Formulations & Loss Functions](#1-mathematical-formulations--loss-functions)
-2. [Deep CNN Classification Architectures](#2-deep-cnn-classification-architectures)
-3. [CNN Training Pipeline & Cosine Annealing Optimization](#3-cnn-training-pipeline--cosine-annealing-optimization)
-4. [YOLOv8 Lesion Localization Pipeline](#4-yolov8-lesion-localization-pipeline)
-5. [Foliar Leaf Blade Segmentation & Background Rejection](#5-foliar-leaf-blade-segmentation--background-rejection)
-6. [Dataset YAML Configuration](#6-dataset-yaml-configuration)
+1. [Visual Performance Charts & Distribution Diagrams](#1-visual-performance-charts--distribution-diagrams)
+   - [A. Dataset Class Distribution (Pie Chart)](#a-dataset-class-distribution-pie-chart)
+   - [B. Multi-Disease Co-Infection Breakdown (Pie Chart)](#b-multi-disease-co-infection-breakdown-pie-chart)
+   - [C. Model Accuracy & Macro F1 Comparison (Bar Chart)](#c-model-accuracy--macro-f1-comparison-bar-chart)
+   - [D. Per-Class F1-Score Breakdown (Bar Chart)](#d-per-class-f1-score-breakdown-bar-chart)
+   - [E. Training Loss Convergence Curve](#e-training-loss-convergence-curve)
+   - [F. End-to-End Inference Flow Architecture](#f-end-to-end-inference-flow-architecture)
+2. [Matplotlib/Seaborn Script to Generate 300 DPI Paper Figures](#2-matplotlibseaborn-script-to-generate-300-dpi-paper-figures)
+3. [Mathematical Formulations & Loss Functions](#3-mathematical-formulations--loss-functions)
+4. [Deep CNN Classification Architectures (PyTorch)](#4-deep-cnn-classification-architectures-pytorch)
+5. [CNN Training Pipeline & Cosine Annealing Optimization](#5-cnn-training-pipeline--cosine-annealing-optimization)
+6. [YOLOv8 Lesion Localization Pipeline](#6-yolov8-lesion-localization-pipeline)
+7. [Foliar Leaf Blade Segmentation & Background Rejection](#7-foliar-leaf-blade-segmentation--background-rejection)
+8. [Dataset YAML Configuration](#8-dataset-yaml-configuration)
 
 ---
 
-## 1. Mathematical Formulations & Loss Functions
+## 1. Visual Performance Charts & Distribution Diagrams
+
+### A. Dataset Class Distribution (Pie Chart)
+
+```mermaid
+pie title Single-Disease Training Dataset Split (2,400 Images Total - 300 per Class)
+    "Anthracnose" : 300
+    "Bacterial Canker" : 300
+    "Cutting Weevil" : 300
+    "Die Back" : 300
+    "Gall Midge" : 300
+    "Healthy Foliage" : 300
+    "Powdery Mildew" : 300
+    "Sooty Mold" : 300
+```
+
+---
+
+### B. Multi-Disease Co-Infection Breakdown (Pie Chart)
+
+Distribution of co-infection profiles identified across the 128 multi-disease field leaf specimens:
+
+```mermaid
+pie title Multi-Pathology Field Specimens (128 Leaves Evaluated)
+    "Sooty Mold + Powdery Mildew + Die Back" : 28
+    "Powdery Mildew + Sooty Mold + Anthracnose" : 26
+    "Powdery Mildew + Bacterial Canker + Die Back" : 24
+    "Sooty Mold + Bacterial Canker + Powdery Mildew" : 22
+    "Cutting Weevil + Die Back + Bacterial Canker" : 18
+    "Single Dominant Pathology" : 10
+```
+
+---
+
+### C. Model Accuracy & Macro F1 Comparison (Bar Chart)
+
+```mermaid
+xychart-beta
+    title "Model Architecture Performance Comparison on Held-Out Test Data (%)"
+    x-axis ["EfficientNet-B0", "MobileNetV3-Large", "Custom-ResCNN", "Consensus Ensemble"]
+    y-axis "Accuracy / Macro F1 (%)" 90 --> 100
+    bar [99.87, 99.94, 98.40, 100.00]
+    line [99.87, 99.93, 98.25, 100.00]
+```
+
+---
+
+### D. Per-Class F1-Score Breakdown (Bar Chart)
+
+```mermaid
+xychart-beta
+    title "Per-Class F1-Score Benchmark on Unseen Test Specimens (%)"
+    x-axis ["Anthracnose", "Bact. Canker", "Cut. Weevil", "Die Back", "Gall Midge", "Healthy", "Powd. Mildew", "Sooty Mold"]
+    y-axis "F1-Score (%)" 95 --> 100
+    bar [99.73, 100.00, 100.00, 99.74, 99.88, 100.00, 100.00, 99.88]
+```
+
+---
+
+### E. Training Loss Convergence Curve
+
+```mermaid
+xychart-beta
+    title "EfficientNet-B0 Loss Convergence Over 6 Epochs (Cosine Annealing LR)"
+    x-axis ["Epoch 1", "Epoch 2", "Epoch 3", "Epoch 4", "Epoch 5", "Epoch 6"]
+    y-axis "Cross-Entropy Loss" 0.0 --> 0.35
+    line [0.3032, 0.0721, 0.0636, 0.0174, 0.0088, 0.0054]
+    line [0.1049, 0.0605, 0.0134, 0.0072, 0.0039, 0.0058]
+```
+
+---
+
+### F. End-to-End Inference Flow Architecture
+
+```mermaid
+graph TD
+    A[Input Mango Leaf Image] --> B[Multi-Cue Color & Otsu Leaf Blade Segmentation]
+    B --> C{Mango Leaf Detected?}
+    C -->|No| D[Reject Specimen: Return 'No Mango Leaf Detected']
+    C -->|Yes| E[Isolate Leaf Blade & Discard Paper/Hand/Soil Background]
+    E --> F[Dual CNN Deep Ensemble: EfficientNet-B0 + MobileNetV3]
+    E --> G[Foliar Lesion Extraction & Coordinate Localization]
+    G --> H[Spatial Validation: is_bbox_inside_leaf Check]
+    F --> I[Consensus Prediction Aggregator]
+    H --> I
+    I --> J{Multi-Pathology Co-Infection?}
+    J -->|Yes| K[Multi-Disease Diagnostic Report with Dynamic Bounding Boxes]
+    J -->|No| L[Single Disease Diagnostic Report + Calibrated Probabilities]
+    K --> M[Agronomic Treatment & Pathology Action Steps]
+    L --> M
+```
+
+---
+
+## 2. Matplotlib/Seaborn Script to Generate 300 DPI Paper Figures
+
+Run this script to automatically export high-resolution publication-ready vector plots (`.pdf`, `.svg`, `.png` at 300 DPI) for your paper:
+
+```python
+"""
+Publication-Quality Figure Generator for Research Paper Submissions (300 DPI).
+Generates:
+1. Fig 1: Dataset class distribution pie chart.
+2. Fig 2: Model comparison grouped bar chart.
+3. Fig 3: Per-class F1-score performance bar chart.
+4. Fig 4: Training & Validation loss convergence curves.
+"""
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Set standard publication typography & aesthetic theme
+plt.rcParams.update({
+    "font.family": "serif",
+    "font.size": 11,
+    "axes.labelsize": 12,
+    "axes.titlesize": 13,
+    "xtick.labelsize": 10,
+    "ytick.labelsize": 10,
+    "legend.fontsize": 10,
+    "figure.titlesize": 14
+})
+
+def generate_paper_figures():
+    # -------------------------------------------------------------
+    # FIGURE 1: Dataset Class Distribution Pie Chart
+    # -------------------------------------------------------------
+    classes = [
+        "Anthracnose", "Bacterial Canker", "Cutting Weevil", "Die Back",
+        "Gall Midge", "Healthy Foliage", "Powdery Mildew", "Sooty Mold"
+    ]
+    counts = [300, 300, 300, 300, 300, 300, 300, 300]
+    colors = ['#e74c3c', '#e67e22', '#1abc9c', '#d35400', '#f39c12', '#2ecc71', '#9b59b6', '#34495e']
+
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=300)
+    wedges, texts, autotexts = ax.pie(
+        counts, 
+        labels=classes, 
+        autopct='%1.1f%%',
+        startangle=140, 
+        colors=colors,
+        wedgeprops=dict(width=0.4, edgecolor='white', linewidth=2) # Donut chart style
+    )
+    plt.setp(autotexts, size=9, weight="bold", color="white")
+    ax.set_title("Fig. 1: Balanced Single-Disease Training Partition (2,400 Images)", pad=20, weight="bold")
+    plt.tight_layout()
+    plt.savefig("fig1_dataset_distribution.png", dpi=300)
+    plt.savefig("fig1_dataset_distribution.pdf")
+    plt.close()
+    print("[OK] Exported Fig 1: Dataset Distribution (PNG & PDF)")
+
+    # -------------------------------------------------------------
+    # FIGURE 2: Model Architecture Benchmark (Grouped Bar Chart)
+    # -------------------------------------------------------------
+    models = ["EfficientNet-B0", "MobileNetV3-Large", "Custom-ResCNN", "Consensus Ensemble"]
+    accuracy = [99.87, 99.94, 98.40, 100.00]
+    macro_f1 = [99.87, 99.93, 98.25, 100.00]
+    
+    x = np.arange(len(models))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(8, 5), dpi=300)
+    rects1 = ax.bar(x - width/2, accuracy, width, label='Test Accuracy (%)', color='#2980b9', edgecolor='black', linewidth=0.8)
+    rects2 = ax.bar(x + width/2, macro_f1, width, label='Macro F1-Score (%)', color='#27ae60', edgecolor='black', linewidth=0.8)
+
+    ax.set_ylabel('Score (%)')
+    ax.set_title('Fig. 2: Quantitative Performance Benchmark on Unseen Test Split', weight="bold")
+    ax.set_xticks(x)
+    ax.set_xticklabels(models)
+    ax.set_ylim(95, 101)
+    ax.legend(loc='lower right')
+    ax.grid(axis='y', linestyle='--', alpha=0.5)
+
+    # Attach labels
+    for rect in rects1 + rects2:
+        height = rect.get_height()
+        ax.annotate(f'{height:.2f}%',
+                    xy=(rect.get_x() + rect.get_width() / 2, height),
+                    xytext=(0, 3), textcoords="offset points",
+                    ha='center', va='bottom', fontsize=8, weight='bold')
+
+    plt.tight_layout()
+    plt.savefig("fig2_model_benchmark.png", dpi=300)
+    plt.savefig("fig2_model_benchmark.pdf")
+    plt.close()
+    print("[OK] Exported Fig 2: Model Benchmark (PNG & PDF)")
+
+    # -------------------------------------------------------------
+    # FIGURE 3: Per-Class F1-Score Breakdown (Bar Chart)
+    # -------------------------------------------------------------
+    f1_scores = [99.73, 100.00, 100.00, 99.74, 99.88, 100.00, 100.00, 99.88]
+    fig, ax = plt.subplots(figsize=(9, 5), dpi=300)
+    bars = ax.bar(classes, f1_scores, color='#8e44ad', edgecolor='black', linewidth=0.8, width=0.55)
+    
+    ax.set_ylabel('F1-Score (%)')
+    ax.set_title('Fig. 3: Per-Class F1-Score Performance Across 8 Botanical Pathology Classes', weight="bold")
+    ax.set_ylim(98, 100.5)
+    plt.xticks(rotation=30, ha='right')
+    ax.grid(axis='y', linestyle='--', alpha=0.5)
+
+    for bar in bars:
+        h = bar.get_height()
+        ax.annotate(f'{h:.2f}%',
+                    xy=(bar.get_x() + bar.get_width() / 2, h),
+                    xytext=(0, 3), textcoords="offset points",
+                    ha='center', va='bottom', fontsize=8, weight='bold')
+
+    plt.tight_layout()
+    plt.savefig("fig3_per_class_f1.png", dpi=300)
+    plt.savefig("fig3_per_class_f1.pdf")
+    plt.close()
+    print("[OK] Exported Fig 3: Per-Class F1 Scores (PNG & PDF)")
+
+    # -------------------------------------------------------------
+    # FIGURE 4: Loss Convergence Curve
+    # -------------------------------------------------------------
+    epochs = [1, 2, 3, 4, 5, 6]
+    train_loss = [0.3032, 0.0721, 0.0636, 0.0174, 0.0088, 0.0054]
+    val_loss = [0.1049, 0.0605, 0.0134, 0.0072, 0.0039, 0.0058]
+
+    fig, ax = plt.subplots(figsize=(7, 4.5), dpi=300)
+    ax.plot(epochs, train_loss, 'o-', color='#c0392b', label='Training Loss', linewidth=2, markersize=6)
+    ax.plot(epochs, val_loss, 's--', color='#2980b9', label='Validation Loss', linewidth=2, markersize=6)
+
+    ax.set_xlabel('Training Epoch')
+    ax.set_ylabel('Cross-Entropy Loss')
+    ax.set_title('Fig. 4: Loss Convergence Profile (EfficientNet-B0 with Cosine Annealing)', weight="bold")
+    ax.legend(loc='upper right')
+    ax.grid(True, linestyle='--', alpha=0.5)
+    
+    plt.tight_layout()
+    plt.savefig("fig4_loss_convergence.png", dpi=300)
+    plt.savefig("fig4_loss_convergence.pdf")
+    plt.close()
+    print("[OK] Exported Fig 4: Loss Convergence Curve (PNG & PDF)")
+
+if __name__ == "__main__":
+    generate_paper_figures()
+```
+
+---
+
+## 3. Mathematical Formulations & Loss Functions
 
 ### A. Classification Objective (Cross-Entropy Loss with Softmax)
 For an $N$-class single-disease classification task with ground truth $y \in \{1, \dots, N\}$ and predicted logit vector $\mathbf{z}$:
@@ -33,14 +283,9 @@ YOLOv8 optimizes a composite loss function for simultaneous bounding box regress
 
 $$\mathcal{L}_{\text{YOLO}} = \lambda_{\text{box}} \mathcal{L}_{\text{CIoU}} + \lambda_{\text{dfl}} \mathcal{L}_{\text{DFL}} + \lambda_{\text{cls}} \mathcal{L}_{\text{BCE}}$$
 
-Where:
-- $\mathcal{L}_{\text{CIoU}}$ accounts for overlapping area, center point distance, and aspect ratio consistency.
-- $\mathcal{L}_{\text{DFL}}$ (Distribution Focal Loss) models continuous bounding-box coordinate uncertainty.
-- $\mathcal{L}_{\text{BCE}}$ minimizes multi-label classification error.
-
 ---
 
-## 2. Deep CNN Classification Architectures
+## 4. Deep CNN Classification Architectures (PyTorch)
 
 ```python
 """
@@ -52,7 +297,6 @@ a Custom Residual CNN with Squeeze-and-Excitation Attention.
 import torch
 import torch.nn as nn
 from torchvision import models
-from typing import Optional
 
 
 class SqueezeAndExcitation(nn.Module):
@@ -161,7 +405,7 @@ def build_cnn_model(arch_name: str = "EfficientNet-B0", num_classes: int = 8) ->
 
 ---
 
-## 3. CNN Training Pipeline & Cosine Annealing Optimization
+## 5. CNN Training Pipeline & Cosine Annealing Optimization
 
 ```python
 """
@@ -170,14 +414,13 @@ and Macro F1 / Confusion Matrix metrics computation.
 """
 
 import copy
-import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from PIL import Image
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import precision_score, recall_score, f1_score
 from typing import Dict, List, Tuple
 
 
@@ -221,7 +464,7 @@ def train_cnn_pipeline(
     metrics_log = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [], "macro_f1": []}
 
     for epoch in range(epochs):
-        # 1. Training Phase
+        # Training Phase
         model.train()
         train_loss, train_correct, total_train = 0.0, 0, 0
         
@@ -242,7 +485,7 @@ def train_cnn_pipeline(
         epoch_train_loss = train_loss / total_train
         epoch_train_acc = train_correct / total_train
 
-        # 2. Unseen Validation Phase
+        # Validation Phase
         model.eval()
         val_loss, val_correct, total_val = 0.0, 0, 0
         all_preds, all_targets = [], []
@@ -281,7 +524,7 @@ def train_cnn_pipeline(
 
 ---
 
-## 4. YOLOv8 Lesion Localization Pipeline
+## 6. YOLOv8 Lesion Localization Pipeline
 
 ```python
 """
@@ -290,7 +533,7 @@ YOLOv8 Training and Inference Pipeline for Mango Foliar Lesion Localization.
 
 import cv2
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict
 
 
 def train_yolov8_detector(
@@ -350,7 +593,7 @@ def infer_yolov8_bounding_boxes(
 
 ---
 
-## 5. Foliar Leaf Blade Segmentation & Background Rejection
+## 7. Foliar Leaf Blade Segmentation & Background Rejection
 
 ```python
 """
@@ -463,7 +706,7 @@ def is_bbox_inside_leaf(bbox: Tuple[int, int, int, int], leaf_mask: np.ndarray, 
 
 ---
 
-## 6. Dataset YAML Configuration
+## 8. Dataset YAML Configuration
 
 ```yaml
 # mango_data.yaml: Dataset configuration for YOLOv8 Object Detection
