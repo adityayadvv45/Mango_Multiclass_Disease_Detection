@@ -2,7 +2,7 @@
  * API Service for Mango Leaf Disease Prediction Backend
  */
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
 /**
  * Converts a data URL (e.g. SVG or base64) or remote URL into a File/Blob object

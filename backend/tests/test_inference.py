@@ -1,11 +1,11 @@
 """
 Automated ML & Inference Test Suite.
 Validates:
-1. All 8 botanical classes on real dataset images.
-2. Composite multi-disease leaf detection.
-3. Strict non-leaf background rejection (paper, hand, soil, table).
-4. No-leaf image rejection.
-5. Coordinate validity and leaf-mask containment for bounding boxes.
+1. Strict non-leaf background rejection (paper, hand, soil, table).
+2. All 8 botanical single-disease classes on real dataset images.
+3. Real dataset multi-disease leaf images and composite specimens.
+4. Precision bounding box coordinates, leaf containment, and valid normalized ranges.
+5. Corrupted / invalid file error handling.
 """
 
 import os
@@ -28,6 +28,7 @@ from backend.models import CANONICAL_CLASSES
 
 DATASET_ROOT = os.path.join(PROJECT_ROOT, "backend", "data", "Mango S data")
 SAMPLE_MULTI_PATH = os.path.join(PROJECT_ROOT, "public", "samples", "multi_disease_leaf.png")
+MULTI_FOLDER_PATH = os.path.join(DATASET_ROOT, "Multi Diease  in one leaf Data")
 
 def test_non_leaf_rejections():
     print("\n" + "="*50)
@@ -56,7 +57,7 @@ def test_non_leaf_rejections():
 
 def test_real_dataset_classes():
     print("\n" + "="*50)
-    print("TEST SUITE 2: Real Dataset 8-Class Inference Validation")
+    print("TEST SUITE 2: Real Dataset 8-Class Inference & Localization Validation")
     print("="*50)
     
     engine = get_inference_engine()
@@ -97,40 +98,52 @@ def test_real_dataset_classes():
         
         # Check coordinates and bounds
         for reg in res["regions"]:
-            assert 0 <= reg["normBox"]["top"] <= 100
-            assert 0 <= reg["normBox"]["left"] <= 100
-            assert reg["normBox"]["width"] > 0
-            assert reg["normBox"]["height"] > 0
+            assert 0 <= reg["normBox"]["top"] <= 100, f"Invalid top: {reg['normBox']['top']}"
+            assert 0 <= reg["normBox"]["left"] <= 100, f"Invalid left: {reg['normBox']['left']}"
+            assert reg["normBox"]["width"] > 0, f"Invalid width: {reg['normBox']['width']}"
+            assert reg["normBox"]["height"] > 0, f"Invalid height: {reg['normBox']['height']}"
+            ymin, xmin, ymax, xmax = reg["box"]
+            assert ymax > ymin and xmax > xmin, f"Invalid box: {reg['box']}"
+            
+        if cls_name == "Healthy":
+            assert len(res["regions"]) == 0, "Healthy leaf should have 0 disease regions!"
+        else:
+            assert len(res["regions"]) > 0, f"Expected localized regions for disease {cls_name}!"
             
         print(f"  [PASS] Class '{cls_name}': Predicted '{res['disease']}' (Conf: {res['confidence']}%, Regions: {len(res['regions'])}, Latency: {res['inferenceTimeMs']}ms)")
         passed_classes.append(cls_name)
         
     print(f"\n  Summary: {len(passed_classes)}/8 classes validated successfully!")
 
-def test_multi_disease_specimen():
+def test_multi_disease_specimens():
     print("\n" + "="*50)
-    print("TEST SUITE 3: Composite Multi-Disease Specimen")
+    print("TEST SUITE 3: Multi-Disease Dataset & Composite Specimens")
     print("="*50)
     
-    if not os.path.exists(SAMPLE_MULTI_PATH):
-        print("  [WARN] Multi-disease sample image not found at public/samples, skipping.")
-        return
-        
     engine = get_inference_engine()
-    with open(SAMPLE_MULTI_PATH, "rb") as f:
-        img_bytes = f.read()
+    
+    # 1. Test public sample
+    if os.path.exists(SAMPLE_MULTI_PATH):
+        with open(SAMPLE_MULTI_PATH, "rb") as f:
+            img_bytes = f.read()
+        res = engine.predict(img_bytes, filename="multi_disease_leaf.png")
+        assert res["success"] == True
+        assert res["leaf_detected"] == True
+        assert len(res["regions"]) > 0, "Expected lesion regions to be localized on multi-disease leaf!"
+        print(f"  [PASS] Public Multi-disease specimen: Disease = '{res['disease']}', Regions: {len(res['regions'])}")
         
-    res = engine.predict(img_bytes, filename="multi_disease_leaf.png")
-    
-    assert res["success"] == True
-    assert res["leaf_detected"] == True
-    assert len(res["regions"]) > 0, "Expected lesion regions to be localized on multi-disease leaf!"
-    
-    print(f"  [PASS] Multi-disease specimen: Status = '{res['status']}'")
-    print(f"         Disease: '{res['disease']}'")
-    print(f"         Detected Lesion Count: {len(res['regions'])}")
-    for r in res["regions"][:5]:
-        print(f"           - Region {r['id']}: {r['disease']} ({r['confidence']}%) at {r['box']}")
+    # 2. Test real multi-disease dataset folder
+    if os.path.exists(MULTI_FOLDER_PATH):
+        multi_files = [f for f in os.listdir(MULTI_FOLDER_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        if multi_files:
+            test_img_name = multi_files[0]
+            with open(os.path.join(MULTI_FOLDER_PATH, test_img_name), "rb") as f:
+                img_bytes = f.read()
+            res = engine.predict(img_bytes, filename=test_img_name)
+            assert res["success"] == True
+            assert res["leaf_detected"] == True
+            assert len(res["regions"]) > 0
+            print(f"  [PASS] Dataset Multi-disease specimen ({test_img_name}): Disease = '{res['disease']}', Regions: {len(res['regions'])}")
 
 def test_corrupt_file_handling():
     print("\n" + "="*50)
@@ -149,7 +162,7 @@ def run_all_tests():
     print("🚀 Running Mango Leaf Backend & ML Verification Suite...")
     test_non_leaf_rejections()
     test_real_dataset_classes()
-    test_multi_disease_specimen()
+    test_multi_disease_specimens()
     test_corrupt_file_handling()
     print("\n" + "="*50)
     print("🎉 ALL TEST SUITES PASSED PERFECTLY!")
@@ -157,3 +170,4 @@ def run_all_tests():
 
 if __name__ == "__main__":
     run_all_tests()
+

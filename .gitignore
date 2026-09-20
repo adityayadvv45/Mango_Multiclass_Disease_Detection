@@ -24,6 +24,7 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache/
+backend/tests/debug_output*
 
 # Editor directories and files
 .vscode/*

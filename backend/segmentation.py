@@ -4,8 +4,7 @@ Accurately segments mango leaf blades and rigorously excludes:
 - White paper / notebook pages
 - Human hands / fingers / skin
 - Table / wooden desk surfaces
-- Soil / floor / grass background
-- Border shadows and non-foliar artifacts
+- Soil / floor / background artifacts
 """
 
 import cv2
@@ -24,22 +23,21 @@ def detect_skin_mask(image_bgr: np.ndarray) -> np.ndarray:
     skin_ycrcb = cv2.inRange(
         ycrcb, 
         np.array([0, 133, 77], dtype=np.uint8), 
-        np.array([255, 175, 127], dtype=np.uint8)
+        np.array([255, 173, 127], dtype=np.uint8)
     )
     
-    # HSV skin tone range (hue in reddish/orange range, moderate saturation)
+    # HSV skin tone range
     skin_hsv1 = cv2.inRange(
         hsv, 
-        np.array([0, 40, 60], dtype=np.uint8), 
-        np.array([25, 200, 255], dtype=np.uint8)
+        np.array([0, 40, 50], dtype=np.uint8), 
+        np.array([25, 220, 255], dtype=np.uint8)
     )
     skin_hsv2 = cv2.inRange(
         hsv, 
-        np.array([170, 40, 60], dtype=np.uint8), 
-        np.array([180, 200, 255], dtype=np.uint8)
+        np.array([170, 40, 50], dtype=np.uint8), 
+        np.array([180, 220, 255], dtype=np.uint8)
     )
     skin_hsv = cv2.bitwise_or(skin_hsv1, skin_hsv2)
-    
     skin_mask = cv2.bitwise_and(skin_ycrcb, skin_hsv)
     
     # Clean up small noise in skin mask
@@ -50,29 +48,18 @@ def detect_skin_mask(image_bgr: np.ndarray) -> np.ndarray:
 
 def detect_paper_background(image_bgr: np.ndarray) -> np.ndarray:
     """
-    Detects white paper, notebook sheets, or high-brightness neutral backgrounds.
+    Detects white paper sheets or high-brightness neutral backgrounds.
     Returns binary mask (255 for paper/bright background, 0 otherwise).
     """
     hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    
-    # Paper typically has low saturation and high value
-    paper_mask1 = cv2.inRange(
-        hsv,
-        np.array([0, 0, 175], dtype=np.uint8),
-        np.array([180, 45, 255], dtype=np.uint8)
-    )
-    
-    # Neutral grey-white where R ~ G ~ B > 165
     b, g, r = cv2.split(image_bgr.astype(np.float32))
-    rg_diff = np.abs(r - g)
-    gb_diff = np.abs(g - b)
-    rb_diff = np.abs(r - b)
-    mean_val = (r + g + b) / 3.0
     
-    neutral_white = (rg_diff < 30) & (gb_diff < 30) & (rb_diff < 30) & (mean_val > 165)
-    paper_mask2 = (neutral_white.astype(np.uint8)) * 255
+    # Paper has extremely low saturation and high brightness
+    paper_mask1 = (hsv[:, :, 1] < 18) & (hsv[:, :, 2] > 195)
+    paper_bright = (r > 225) & (g > 225) & (b > 225)
+    paper_bluish = (b > r + 20) & (b > g + 15) & (hsv[:, :, 2] > 180)
     
-    paper_mask = cv2.bitwise_or(paper_mask1, paper_mask2)
+    paper_mask = (paper_mask1 | paper_bright | paper_bluish).astype(np.uint8) * 255
     return paper_mask
 
 def detect_soil_table_background(image_bgr: np.ndarray) -> np.ndarray:
@@ -81,17 +68,16 @@ def detect_soil_table_background(image_bgr: np.ndarray) -> np.ndarray:
     Returns binary mask (255 for soil/table, 0 otherwise).
     """
     b, g, r = cv2.split(image_bgr.astype(np.float32))
-    # Excess green index: 2G - R - B. Plants have positive ExG; soil/wood have negative ExG.
     exg = 2.0 * g - r - b
     
-    # Soil/wood has R > G + 10 and ExG < -15
-    soil_condition = (r > (g + 10)) & (exg < -15) & (r > b)
+    # Soil/wood has R > G + 18 and ExG < -25
+    soil_condition = (r > (g + 18)) & (exg < -25) & (r > b + 15)
     soil_mask = (soil_condition.astype(np.uint8)) * 255
     return soil_mask
 
 def segment_mango_leaf(image_bgr: np.ndarray) -> Tuple[np.ndarray, bool, np.ndarray, Dict[str, Any]]:
     """
-    Performs multi-cue leaf segmentation and background rejection.
+    Performs robust multi-cue leaf blade segmentation and background rejection.
     
     Returns:
     - leaf_mask: np.ndarray (uint8, 0 or 255)
@@ -102,132 +88,71 @@ def segment_mango_leaf(image_bgr: np.ndarray) -> Tuple[np.ndarray, bool, np.ndar
     h, w = image_bgr.shape[:2]
     img_area = h * w
     
-    # Compute rejection masks
+    # 1. Color and vegetation cues
+    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
+    b, g, r = cv2.split(image_bgr.astype(np.float32))
+    exg = 2.0 * g - r - b
+    
+    # Rejection masks
     skin_mask = detect_skin_mask(image_bgr)
     paper_mask = detect_paper_background(image_bgr)
     soil_mask = detect_soil_table_background(image_bgr)
     
-    rejection_mask = cv2.bitwise_or(skin_mask, paper_mask)
-    rejection_mask = cv2.bitwise_or(rejection_mask, soil_mask)
+    # Foliar color ranges:
+    # 1. Healthy / olive / green vegetation
+    is_green = (hsv[:, :, 0] >= 18) & (hsv[:, :, 0] <= 95) & (hsv[:, :, 1] >= 22)
+    is_exg = (exg > -12) & (hsv[:, :, 1] >= 18)
+    # 2. Necrotic / chlorotic / brown foliar tissue
+    is_necrotic = (hsv[:, :, 0] >= 6) & (hsv[:, :, 0] <= 28) & (hsv[:, :, 1] >= 35) & (hsv[:, :, 2] > 20) & (hsv[:, :, 2] < 210)
+    # 3. Dark fungal soot / anthracnose spots on leaf
+    is_dark = (hsv[:, :, 2] < 100) & (hsv[:, :, 1] > 15) & (g >= b - 12)
+    # 4. Pale powdery mildew on leaf blade
+    is_powdery = (hsv[:, :, 2] > 140) & (hsv[:, :, 1] < 60) & (g > 60) & (r > 60) & (b > 60)
     
-    # Color spaces
-    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    lab = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2LAB)
+    candidate = (is_green | is_exg | is_necrotic | is_dark | is_powdery) & (paper_mask == 0) & (skin_mask == 0) & (soil_mask == 0)
+    candidate_mask = candidate.astype(np.uint8) * 255
     
-    b, g, r = cv2.split(image_bgr.astype(np.float32))
-    exg = 2.0 * g - r - b
+    # Morphological connecting
+    k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    candidate_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_CLOSE, k_close, iterations=2)
+    candidate_mask = cv2.morphologyEx(candidate_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)), iterations=1)
     
-    # 1. Foliage Green & Olive Mask (covers healthy and mild chlorotic tissue)
-    # Hue in OpenCV HSV is [0..180]. Green is ~ 25 to 95.
-    foliage_green = cv2.inRange(
-        hsv,
-        np.array([20, 20, 20], dtype=np.uint8),
-        np.array([98, 255, 255], dtype=np.uint8)
-    )
-    
-    # 2. ExG plant threshold
-    exg_mask = (exg > -5).astype(np.uint8) * 255
-    
-    # 3. Diseased Necrotic / Halo / Lesion Tissue on Leaf
-    # Yellow halos, anthracnose brown necrosis, die-back brown leaf margins
-    necrosis_hsv = cv2.inRange(
-        hsv,
-        np.array([5, 30, 20], dtype=np.uint8),
-        np.array([25, 255, 240], dtype=np.uint8)
-    )
-    
-    # 4. Powdery mildew / pale spots
-    powdery_hsv = cv2.inRange(
-        hsv,
-        np.array([15, 10, 100], dtype=np.uint8),
-        np.array([105, 100, 255], dtype=np.uint8)
-    )
-    
-    # 5. Sooty Mold (dark fungal coat on leaf surface)
-    sooty_hsv = cv2.inRange(
-        hsv,
-        np.array([0, 0, 10], dtype=np.uint8),
-        np.array([180, 255, 70], dtype=np.uint8)
-    )
-    
-    # Primary candidate leaf pixels
-    candidate_leaf = cv2.bitwise_or(foliage_green, necrosis_hsv)
-    candidate_leaf = cv2.bitwise_or(candidate_leaf, exg_mask)
-    candidate_leaf = cv2.bitwise_or(candidate_leaf, powdery_hsv)
-    
-    # If the background is bright/paper (as in MangoLeafBD dataset),
-    # Otsu thresholding on the grayscale/green-channel also separates the leaf cleanly
-    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, otsu_dark = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    
-    # If image has white background, otsu_dark isolates the darker leaf
-    corner_pixels = np.vstack([
-        image_bgr[:15, :15].reshape(-1, 3),
-        image_bgr[:15, -15:].reshape(-1, 3),
-        image_bgr[-15:, :15].reshape(-1, 3),
-        image_bgr[-15:, -15:].reshape(-1, 3)
-    ])
-    corner_mean_brightness = float(np.mean(corner_pixels))
-    
-    if corner_mean_brightness > 140:
-        # White/light paper background: Otsu inverse + foliage color gives robust leaf silhouette
-        candidate_leaf = cv2.bitwise_or(candidate_leaf, otsu_dark)
-        # On white paper, reject paper and skin only
-        candidate_leaf = cv2.bitwise_and(candidate_leaf, cv2.bitwise_not(paper_mask))
-        candidate_leaf = cv2.bitwise_and(candidate_leaf, cv2.bitwise_not(skin_mask))
-    else:
-        # Outdoor/complex background: subtract paper, skin, and soil rejections
-        candidate_leaf = cv2.bitwise_and(candidate_leaf, cv2.bitwise_not(paper_mask))
-        candidate_leaf = cv2.bitwise_and(candidate_leaf, cv2.bitwise_not(skin_mask))
-        candidate_leaf = cv2.bitwise_and(candidate_leaf, cv2.bitwise_not(soil_mask))
-    
-    # Morphological cleanup
-    kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    candidate_leaf = cv2.morphologyEx(candidate_leaf, cv2.MORPH_OPEN, kernel_small, iterations=2)
-    candidate_leaf = cv2.morphologyEx(candidate_leaf, cv2.MORPH_CLOSE, kernel_small, iterations=3)
-    
-    # Find connected components / contours
-    contours, _ = cv2.findContours(candidate_leaf, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(candidate_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     if not contours:
-        return np.zeros((h, w), dtype=np.uint8), False, image_bgr, {"reason": "No contours found"}
+        # Fallback using Otsu on inverted saturation + luminance contrast
+        gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
+        _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        otsu_cand = cv2.bitwise_and(otsu, cv2.bitwise_not(paper_mask))
+        contours, _ = cv2.findContours(otsu_cand, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-    # Filter contours by minimum area (at least 1.2% of the total image)
-    min_area = 0.012 * img_area
-    valid_contours = [c for c in contours if cv2.contourArea(c) >= min_area]
-    
-    if not valid_contours:
-        # Check if the largest contour is reasonable
-        largest = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(largest) < 0.005 * img_area:
-            return np.zeros((h, w), dtype=np.uint8), False, image_bgr, {"reason": "Contour area below threshold"}
-        valid_contours = [largest]
+    if not contours:
+        return np.zeros((h, w), dtype=np.uint8), False, image_bgr, {"reason": "No leaf contour found"}
         
-    # Build the preliminary leaf mask from the valid contours
+    # Get largest contour corresponding to the main mango leaf blade
+    main_contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(main_contour) < 0.005 * img_area:
+        return np.zeros((h, w), dtype=np.uint8), False, image_bgr, {"reason": "Contour area below threshold"}
+        
     leaf_mask = np.zeros((h, w), dtype=np.uint8)
-    for c in valid_contours:
-        cv2.drawContours(leaf_mask, [c], -1, 255, thickness=cv2.FILLED)
-        
-    # Fill internal holes (e.g. inner dark lesions or sooty mold patches)
-    kernel_fill = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-    leaf_mask = cv2.morphologyEx(leaf_mask, cv2.MORPH_CLOSE, kernel_fill, iterations=4)
+    cv2.drawContours(leaf_mask, [main_contour], -1, 255, thickness=cv2.FILLED)
     
-    # Re-apply strict hand/skin rejection to prevent hand intrusion
+    # Fill internal holes (e.g. inner lesions or veins) to form a solid leaf blade mask
+    k_fill = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (25, 25))
+    leaf_mask = cv2.morphologyEx(leaf_mask, cv2.MORPH_CLOSE, k_fill, iterations=3)
+    
+    # Exclude skin mask borders if any
     leaf_mask = cv2.bitwise_and(leaf_mask, cv2.bitwise_not(skin_mask))
-    leaf_mask = cv2.bitwise_and(leaf_mask, cv2.bitwise_not(paper_mask))
     
-    # Final check on leaf mask size
     leaf_pixel_count = int(cv2.countNonZero(leaf_mask))
     leaf_area_ratio = leaf_pixel_count / float(img_area)
     
-    if leaf_area_ratio < 0.007:
+    if leaf_area_ratio < 0.005:
         return np.zeros((h, w), dtype=np.uint8), False, image_bgr, {
             "reason": "Leaf area ratio too low",
             "leaf_area_ratio": leaf_area_ratio
         }
         
-    # Apply mask to image (zero out background)
     masked_bgr = cv2.bitwise_and(image_bgr, image_bgr, mask=leaf_mask)
     
     metadata = {
@@ -244,11 +169,11 @@ def segment_mango_leaf(image_bgr: np.ndarray) -> Tuple[np.ndarray, bool, np.ndar
 def is_bbox_inside_leaf(
     bbox: Tuple[int, int, int, int], 
     leaf_mask: np.ndarray, 
-    min_overlap_ratio: float = 0.40
+    min_overlap_ratio: float = 0.15
 ) -> bool:
     """
-    Checks if a detected bounding box [ymin, xmin, ymax, xmax] is genuinely on the leaf.
-    Strictly rejects any detection on paper, hand, table, soil, or background.
+    Checks if a detected bounding box [ymin, xmin, ymax, xmax] overlaps genuinely with the leaf.
+    Supports slender, curved, or diagonally oriented leaves.
     """
     ymin, xmin, ymax, xmax = bbox
     h, w = leaf_mask.shape[:2]
@@ -269,9 +194,5 @@ def is_bbox_inside_leaf(
     leaf_overlap_pixels = cv2.countNonZero(box_region)
     overlap_ratio = leaf_overlap_pixels / float(box_area)
     
-    # Check center point
-    cy = (ymin + ymax) // 2
-    cx = (xmin + xmax) // 2
-    center_is_leaf = (leaf_mask[cy, cx] > 0)
-    
-    return (overlap_ratio >= min_overlap_ratio) and center_is_leaf
+    return (overlap_ratio >= min_overlap_ratio) and (leaf_overlap_pixels >= 30)
+

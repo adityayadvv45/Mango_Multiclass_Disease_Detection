@@ -43,59 +43,62 @@ export default function SpecimenBoxOverlay({
       </div>
 
       {/* Interactive Image Frame with Overlays */}
-      <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-square w-full flex items-center justify-center group shadow-2xl">
+      <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 w-full min-h-[380px] max-h-[500px] flex items-center justify-center group shadow-2xl p-3">
         
-        {/* Base Specimen Image */}
-        <img
-          src={imagePreviewUrl}
-          alt="Scanned Mango Leaf Specimen"
-          className="w-full h-full object-contain p-2 select-none"
-        />
+        {/* Inner container tightly matching the image boundaries */}
+        <div className="relative inline-block max-w-full max-h-full">
+          {/* Base Specimen Image */}
+          <img
+            src={imagePreviewUrl}
+            alt="Scanned Mango Leaf Specimen"
+            className="max-w-full max-h-[460px] w-auto h-auto object-contain block rounded-lg select-none"
+          />
+
+          {/* Bounding Boxes Layer - aligned exactly to the image */}
+          {showBoxes && regions.length > 0 && (
+            <div className="absolute inset-0 pointer-events-none">
+              {regions.map((region) => {
+                const colorInfo = DISEASE_BOX_COLORS[region.disease] || DISEASE_BOX_COLORS["Anthracnose"];
+                const isHovered = hoveredRegionId === region.id;
+                const { top, left, width, height } = region.normBox || { top: 20, left: 20, width: 25, height: 25 };
+
+                return (
+                  <div
+                    key={region.id}
+                    onMouseEnter={() => onHoverRegion(region.id)}
+                    onMouseLeave={() => onHoverRegion(null)}
+                    style={{
+                      top: `${top}%`,
+                      left: `${left}%`,
+                      width: `${width}%`,
+                      height: `${height}%`,
+                      borderColor: colorInfo.stroke,
+                      backgroundColor: isHovered ? colorInfo.fill.replace('0.15', '0.35') : colorInfo.fill,
+                    }}
+                    className={`absolute rounded-md border-2 pointer-events-auto cursor-pointer transition-all duration-200 ${
+                      isHovered ? 'scale-105 z-30 shadow-lg ring-2 ring-white/50' : 'z-10 hover:z-20'
+                    }`}
+                  >
+                    {/* Bounding Box Label Tag */}
+                    <div
+                      style={{ backgroundColor: colorInfo.stroke, color: '#09090b' }}
+                      className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[9px] font-mono font-black whitespace-nowrap shadow-md uppercase tracking-tight flex items-center gap-1"
+                    >
+                      <span>{region.disease}</span>
+                      <span className="opacity-90">{region.confidence}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
         {/* Reticle Focus Corners */}
         <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-emerald-400/70 pointer-events-none"></div>
         <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-emerald-400/70 pointer-events-none"></div>
         <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-emerald-400/70 pointer-events-none"></div>
         <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-emerald-400/70 pointer-events-none"></div>
-
-        {/* Bounding Boxes Layer */}
-        {showBoxes && regions.length > 0 && (
-          <div className="absolute inset-0 pointer-events-none">
-            {regions.map((region) => {
-              const colorInfo = DISEASE_BOX_COLORS[region.disease] || DISEASE_BOX_COLORS["Anthracnose"];
-              const isHovered = hoveredRegionId === region.id;
-              const { top, left, width, height } = region.normBox || { top: 20, left: 20, width: 25, height: 25 };
-
-              return (
-                <div
-                  key={region.id}
-                  onMouseEnter={() => onHoverRegion(region.id)}
-                  onMouseLeave={() => onHoverRegion(null)}
-                  style={{
-                    top: `${top}%`,
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    height: `${height}%`,
-                    borderColor: colorInfo.stroke,
-                    backgroundColor: isHovered ? colorInfo.fill.replace('0.15', '0.35') : colorInfo.fill,
-                  }}
-                  className={`absolute rounded-md border-2 pointer-events-auto cursor-pointer transition-all duration-200 ${
-                    isHovered ? 'scale-105 z-30 shadow-lg ring-2 ring-white/50' : 'z-10 hover:z-20'
-                  }`}
-                >
-                  {/* Bounding Box Label Tag */}
-                  <div
-                    style={{ backgroundColor: colorInfo.stroke, color: '#09090b' }}
-                    className="absolute -top-5 left-0 px-1.5 py-0.5 rounded text-[9px] font-mono font-black whitespace-nowrap shadow-md uppercase tracking-tight flex items-center gap-1"
-                  >
-                    <span>{region.disease}</span>
-                    <span className="opacity-90">{region.confidence}%</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
 
         {/* High Risk / Healthy Indicator Floating Badge */}
         <div className="absolute top-3 left-3 pointer-events-none">
