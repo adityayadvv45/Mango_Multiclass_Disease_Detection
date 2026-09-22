@@ -1,5 +1,5 @@
 import React from 'react';
-import { Target, Layers } from 'lucide-react';
+import { Layers } from 'lucide-react';
 import { DISEASE_BOX_COLORS } from '../data/mockResults';
 
 export default function LesionRegionList({ 

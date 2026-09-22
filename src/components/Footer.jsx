@@ -1,5 +1,5 @@
 import React from 'react';
-import { Leaf, Shield, Cpu, Code2, Heart, ArrowUpRight } from 'lucide-react';
+import { Leaf, Shield, Cpu, Code2, ArrowUpRight } from 'lucide-react';
 
 export default function Footer({ setActivePage }) {
   const handleNavClick = (pageId) => {

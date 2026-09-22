@@ -15,12 +15,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy backend requirements and install CPU-optimized PyTorch
-COPY backend/requirements.txt /app/backend/requirements.txt
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r /app/backend/requirements.txt
+    pip install --no-cache-dir -r /app/requirements.txt
 
-# Copy backend code and model weights
+# Copy backend code, models, and static assets
 COPY backend /app/backend
 COPY public /app/public
 

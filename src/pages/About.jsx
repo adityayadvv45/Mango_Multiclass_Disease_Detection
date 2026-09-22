@@ -9,10 +9,8 @@ import {
   History, 
   ShieldCheck, 
   BarChart3, 
-  CheckCircle2, 
   Database,
-  ArrowRight,
-  GitBranch
+  ArrowRight
 } from 'lucide-react';
 import { MANGO_DISEASES } from '../data/diseases';
 

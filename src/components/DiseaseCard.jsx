@@ -8,7 +8,6 @@ import {
   Flame, 
   Bug,
   Scissors,
-  CheckCircle, 
   ArrowRight,
   Info
 } from 'lucide-react';

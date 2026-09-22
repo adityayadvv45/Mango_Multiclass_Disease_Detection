@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, Circle, Loader2, Sparkles, Cpu, Scan } from 'lucide-react';
+import { CheckCircle2, Circle, Loader2, Scan } from 'lucide-react';
 
 export default function AnalysisLoader({ previewUrl, onComplete }) {
   const [currentStep, setCurrentStep] = useState(0);

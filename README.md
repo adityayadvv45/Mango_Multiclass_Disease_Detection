@@ -270,11 +270,16 @@ MangoLeaf/
 │   ├── data/                   # Mango Leaf dataset (single & multi-disease)
 │   ├── models/                 # Exported PyTorch model bundle (.pth)
 │   ├── tests/                  # Automated API & ML test suites
+│   │   ├── test_api.py         # FastAPI REST integration test suite
+│   │   └── test_inference.py   # Complete inference & segmentation test suite
+│   ├── training/               # Clean training pipelines
+│   │   ├── train_pipeline.py   # Dual-backbone CNN training pipeline
+│   │   └── train_yolo.py       # YOLOv8 lesion detector training script
 │   ├── inference.py            # Singleton inference & lesion localization engine
 │   ├── main.py                 # FastAPI application server
 │   ├── models.py               # CNN architecture definitions & botanical metadata
-│   ├── segmentation.py         # Leaf segmentation & background rejection engine
-│   └── train_pipeline.py       # Balanced 300 samples/class training pipeline
+│   ├── requirements.txt        # Backend dependencies
+│   └── segmentation.py         # Leaf segmentation & background rejection engine
 ├── src/
 │   ├── components/             # React UI components (Upload, Results, Overlays)
 │   ├── data/                   # Botanical disease etiology & sample presets
@@ -283,8 +288,11 @@ MangoLeaf/
 │   ├── App.jsx                 # Top-level React routing
 │   └── main.jsx                # Application bootstrap
 ├── public/                     # Static assets and specimen samples
+├── Dockerfile                  # Production container configuration
+├── render.yaml                 # Cloud deployment configuration
 ├── model_code.md               # Google Colab ready research paper code & charts
-├── package.json                # Frontend dependencies
+├── package.json                # Frontend dependencies & scripts
+├── requirements.txt            # Root dependencies
 ├── vite.config.js              # Vite bundler configuration
 └── README.md                   # Project documentation
 ```

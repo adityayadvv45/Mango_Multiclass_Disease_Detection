@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, Sparkles, BookOpen, ShieldCheck, Cpu, Layers, Activity, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, Sparkles, BookOpen, ShieldCheck, Activity } from 'lucide-react';
 
 export default function Hero({ onStartDetection, onExploreDiseases }) {
   return (

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { MANGO_DISEASES, CATEGORIES } from '../data/diseases';
 import DiseaseCard from '../components/DiseaseCard';
 import { SAMPLE_LEAF_IMAGES } from '../data/sampleImages';
-import { BookOpen, Search, Filter, Sparkles, ShieldCheck } from 'lucide-react';
+import { BookOpen, Search, ShieldCheck, Sparkles } from 'lucide-react';
 
 export default function Diseases({ onSelectDiseaseForTest }) {
   const [searchQuery, setSearchQuery] = useState('');

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lightbulb, RotateCcw, ShieldAlert, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Lightbulb, RotateCcw, AlertTriangle } from 'lucide-react';
 
 export default function RecommendationCard({ disease, onReset }) {
   if (!disease) return null;

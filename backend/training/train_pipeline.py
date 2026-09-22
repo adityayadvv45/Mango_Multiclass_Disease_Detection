@@ -6,16 +6,7 @@ on exactly 300 images per single-disease class with a held-out test split.
 
 import os
 import sys
-
-# Configure UTF-8 stdout for Windows terminals
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
-
-# Ensure project root is in sys.path
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
+import csv
 import copy
 import time
 import random
@@ -26,8 +17,17 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from PIL import Image
-from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, classification_report
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 from typing import Dict, Tuple, List
+
+# Configure UTF-8 stdout for Windows terminals
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from backend.models import (
     CANONICAL_CLASSES,
@@ -71,7 +71,6 @@ def prepare_data_splits(data_root: str, train_per_class: int = TRAIN_SAMPLES_PER
     random.seed(seed)
     np.random.seed(seed)
     
-    # 8 Single-Disease Classes (exclude multi-disease folder)
     single_disease_folders = [
         "Anthracnose",
         "Bacterial Canker",
@@ -83,7 +82,6 @@ def prepare_data_splits(data_root: str, train_per_class: int = TRAIN_SAMPLES_PER
         "Sooty Mould"
     ]
     
-    # Map to canonical names
     classes = [normalize_class_name(f) for f in single_disease_folders]
     class_to_idx = {c: i for i, c in enumerate(classes)}
     
@@ -99,7 +97,6 @@ def prepare_data_splits(data_root: str, train_per_class: int = TRAIN_SAMPLES_PER
         valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.JPG', '.JPEG', '.PNG')
         all_imgs = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith(valid_exts)]
         
-        # Sort first for reproducibility, then shuffle with seed
         all_imgs = sorted(all_imgs)
         random.shuffle(all_imgs)
         
@@ -125,6 +122,17 @@ def prepare_data_splits(data_root: str, train_per_class: int = TRAIN_SAMPLES_PER
         }
         
     return (train_paths, train_labels), (val_paths, val_labels), classes, class_stats
+
+def save_history_to_csv(history: List[Dict], csv_path: str):
+    """Saves training history using built-in csv module (no pandas dependency)."""
+    if not history:
+        return
+    fieldnames = list(history[0].keys())
+    with open(csv_path, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(history)
+    print(f"📄 Saved training history log -> '{csv_path}'")
 
 def train_and_export():
     os.makedirs(os.path.dirname(BUNDLE_OUTPUT_PATH), exist_ok=True)
@@ -184,6 +192,7 @@ def train_and_export():
         best_acc = 0.0
         best_wts = copy.deepcopy(model.state_dict())
         best_epoch_metrics = {}
+        history = []
         
         start_time = time.time()
         for epoch in range(EPOCHS):
@@ -235,13 +244,21 @@ def train_and_export():
             r = recall_score(all_labels, all_preds, average='macro', zero_division=0)
             f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
             
+            history.append({
+                "epoch": epoch + 1,
+                "train_loss": round(float(train_epoch_loss), 4),
+                "train_acc": round(float(train_epoch_acc), 4),
+                "val_loss": round(float(val_epoch_loss), 4),
+                "val_acc": round(float(val_epoch_acc), 4),
+                "macro_f1": round(float(f1), 4)
+            })
+            
             print(f"Epoch {epoch+1:2d}/{EPOCHS:2d} -> Train Loss: {train_epoch_loss:.4f} Acc: {train_epoch_acc:.2%} | Val Loss: {val_epoch_loss:.4f} Val Acc: {val_epoch_acc:.2%} | Macro F1: {f1:.4f}")
             
             if val_epoch_acc > best_acc:
                 best_acc = val_epoch_acc
                 best_wts = copy.deepcopy(model.state_dict())
                 
-                # Compute per-class F1-scores
                 per_class_f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
                 per_class_metrics = {classes[i]: float(per_class_f1[i]) for i in range(len(classes))}
                 
@@ -257,10 +274,7 @@ def train_and_export():
                 
         elapsed = time.time() - start_time
         print(f"\n[TRAIN] {arch_name} complete in {elapsed:.1f}s. Best Unseen Test Accuracy: {best_acc:.2%}")
-        print(f"Per-Class F1 Scores on Unseen Test Data:")
-        for c, f in best_epoch_metrics["PerClassF1"].items():
-            print(f"  {c:18s}: {f:.2%}")
-            
+        
         trained_weights_dict[arch_name] = best_wts
         metrics_summary[arch_name] = best_epoch_metrics
         

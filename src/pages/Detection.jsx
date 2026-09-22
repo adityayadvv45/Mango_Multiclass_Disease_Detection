@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import UploadBox from '../components/UploadBox';
 import ImagePreview from '../components/ImagePreview';
 import AnalysisLoader from '../components/AnalysisLoader';
@@ -21,9 +21,11 @@ export default function Detection({ initialSample = null }) {
     isSample: true
   } : null);
   const [predictionResult, setPredictionResult] = useState(null);
+  const [prevSample, setPrevSample] = useState(initialSample);
 
   // Sync if initialSample changes via external navigation
-  useEffect(() => {
+  if (initialSample !== prevSample) {
+    setPrevSample(initialSample);
     if (initialSample) {
       setImageData({
         file: null,
@@ -38,7 +40,7 @@ export default function Detection({ initialSample = null }) {
       setStage('PREVIEW');
       setPredictionResult(null);
     }
-  }, [initialSample]);
+  }
 
   // Handle uploaded image file
   const handleImageSelected = (data) => {

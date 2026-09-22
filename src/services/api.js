@@ -7,7 +7,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 /**
  * Converts a data URL (e.g. SVG or base64) or remote URL into a File/Blob object
  */
-async function urlToFileBlob(url, filename = 'specimen.jpg') {
+async function urlToFileBlob(url) {
   if (url.startsWith('data:image/svg+xml')) {
     // For SVG data URLs, create an SVG blob
     const svgContent = decodeURIComponent(url.split(',')[1]);

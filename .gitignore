@@ -1,4 +1,4 @@
-# Logs
+# Logs & Runs
 logs
 *.log
 npm-debug.log*
@@ -6,8 +6,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+runs/
 
-# Dependencies
+# Dependencies & Builds
 node_modules
 dist
 dist-ssr
@@ -26,6 +27,8 @@ __pycache__/
 .pytest_cache/
 backend/tests/debug_output*
 hf_space_download/
+generated_charts/
+.gemini/
 
 # Editor directories and files
 .vscode/*
@@ -37,3 +40,4 @@ hf_space_download/
 *.njsproj
 *.sln
 *.sw?
+

@@ -7,11 +7,9 @@ import { SAMPLE_LEAF_IMAGES } from '../data/sampleImages';
 import { 
   Sparkles, 
   ArrowRight, 
-  BookOpen, 
   ShieldCheck, 
   Cpu, 
   Microscope, 
-  Leaf, 
   Zap 
 } from 'lucide-react';
 

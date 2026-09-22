@@ -1,13 +1,7 @@
 import React, { useState } from 'react';
 import { 
-  ShieldAlert, 
-  ShieldCheck, 
-  Activity, 
-  Clock, 
-  Cpu, 
   RotateCcw,
   AlertTriangle,
-  Layers,
   Sparkles
 } from 'lucide-react';
 import SpecimenBoxOverlay from './SpecimenBoxOverlay';
@@ -80,6 +74,8 @@ export default function ResultCard({ prediction, imagePreviewUrl, imageData, onR
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
             {prediction.detectedDiseases?.map((d) => {
               const isSelected = selectedDiseaseName.toLowerCase() === d.name.toLowerCase();
+              const matchedPred = prediction.predictions?.find(p => p.name.toLowerCase() === d.name.toLowerCase());
+              const confVal = d.confidence || matchedPred?.confidence;
               return (
                 <button
                   key={d.id || d.name}
@@ -91,7 +87,7 @@ export default function ResultCard({ prediction, imagePreviewUrl, imageData, onR
                   }`}
                 >
                   <span>{d.name}</span>
-                  <span className="ml-1.5 opacity-80">97%</span>
+                  {confVal && <span className="ml-1.5 opacity-80">{confVal}%</span>}
                 </button>
               );
             })}

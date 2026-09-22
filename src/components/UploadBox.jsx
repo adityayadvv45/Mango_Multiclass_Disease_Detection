@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, Image as ImageIcon, AlertCircle, Sparkles, CheckCircle2, Zap } from 'lucide-react';
+import { UploadCloud, Image as ImageIcon, AlertCircle, Sparkles } from 'lucide-react';
 import { SAMPLE_LEAF_IMAGES } from '../data/sampleImages';
 
 export default function UploadBox({ onImageSelected, onSampleSelected }) {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trash2, RefreshCw, Sparkles, FileText, HardDrive, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Trash2, RefreshCw, Sparkles } from 'lucide-react';
 
 export default function ImagePreview({ imageData, onRemove, onReplace, onAnalyze, isAnalyzing }) {
   if (!imageData) return null;
