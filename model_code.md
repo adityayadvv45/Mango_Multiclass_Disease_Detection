@@ -1,8 +1,6 @@
-# 🥭 Mango Guard AI — Research Paper Chart & Code Generation Suite
+# 🥭 Mango  AI — Research Paper Chart & Code Generation Suite
 
-Ready-to-run Google Colab code cells to generate 300 DPI publication-quality benchmark charts (for IEEE, Springer, Elsevier, etc.).
 
----
 
 # 🔵 CELL 1: CNN EVALUATION & METRICS PLOTS (Google Colab Code)
 
