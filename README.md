@@ -1,13 +1,4 @@
----
-title: Mango Multiclass Disease Detection
-emoji: 🥭
-colorFrom: green
-colorTo: yellow
-sdk: docker
-app_port: 8000
-pinned: false
-license: apache-2.0
----
+
 
 # 🥭 Mango AI — Mango_Multiclass_Disease_Detection
 
