@@ -1,12 +1,13 @@
 """
 PyTorch Multi-Model Training & Weight Export Pipeline.
 Trains high-performance EfficientNet-B0 and MobileNetV3-Large classifiers
-on exactly 300 images per single-disease class with a held-out test split.
+on the combined verified Mango Leaf dataset + Roboflow ground-truth training set.
 """
 
 import os
 import sys
 import csv
+import glob
 import copy
 import time
 import random
@@ -39,12 +40,21 @@ from backend.models import (
 )
 
 DATA_ROOT = os.path.join(PROJECT_ROOT, "backend", "data", "Mango S data")
+ROBOFLOW_TRAIN_DIR = os.path.join(PROJECT_ROOT, "backend", "data", "Multiclass_leaf.v5i.yolov8-data", "train")
 BUNDLE_OUTPUT_PATH = os.path.join(PROJECT_ROOT, "backend", "models", "mango_model_bundle.pth")
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 32
 EPOCHS = 6
 SEED = 42
 TRAIN_SAMPLES_PER_CLASS = 300
+
+ROBOFLOW_TO_CANONICAL = {
+    0: "Anthracnose",
+    1: "Bacterial Canker",
+    2: "Powdery Mildew",
+    3: "Die Back",
+    4: "Gall Midge"
+}
 
 class CustomMangoDataset(Dataset):
     def __init__(self, image_paths: List[str], labels: List[int], transform=None):
@@ -63,49 +73,84 @@ class CustomMangoDataset(Dataset):
         label = self.labels[idx]
         return image, label
 
+def load_roboflow_train_data(class_to_idx: Dict[str, int]) -> Tuple[List[str], List[int]]:
+    """Loads images from Roboflow train split with their ground truth class labels."""
+    images_dir = os.path.join(ROBOFLOW_TRAIN_DIR, "images")
+    labels_dir = os.path.join(ROBOFLOW_TRAIN_DIR, "labels")
+    
+    if not os.path.exists(images_dir) or not os.path.exists(labels_dir):
+        print(f"[WARN] Roboflow train directory not found at {ROBOFLOW_TRAIN_DIR}")
+        return [], []
+        
+    img_files = sorted(glob.glob(os.path.join(images_dir, "*.jpg")) + glob.glob(os.path.join(images_dir, "*.png")))
+    rf_paths, rf_labels = [], []
+    
+    for img_path in img_files:
+        base_name = os.path.splitext(os.path.basename(img_path))[0]
+        lbl_path = os.path.join(labels_dir, f"{base_name}.txt")
+        
+        classes_present = set()
+        if os.path.exists(lbl_path):
+            with open(lbl_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if parts:
+                        try:
+                            cid = int(parts[0])
+                            if cid in ROBOFLOW_TO_CANONICAL:
+                                classes_present.add(ROBOFLOW_TO_CANONICAL[cid])
+                        except ValueError:
+                            pass
+                            
+        if not classes_present:
+            # Unlabeled in Roboflow = Healthy leaf
+            c_name = "Healthy"
+            if c_name in class_to_idx:
+                rf_paths.append(img_path)
+                rf_labels.append(class_to_idx[c_name])
+        else:
+            # For each disease present in this training image, add sample
+            for c_name in classes_present:
+                if c_name in class_to_idx:
+                    rf_paths.append(img_path)
+                    rf_labels.append(class_to_idx[c_name])
+                    
+    print(f"  [ROBOFLOW] Loaded {len(rf_paths)} training samples from {len(img_files)} Roboflow train images.")
+    return rf_paths, rf_labels
+
 def prepare_data_splits(data_root: str, train_per_class: int = TRAIN_SAMPLES_PER_CLASS, seed: int = SEED):
     """
-    Scans the 8 single-disease classes, samples exactly 300 images per class for training,
-    and reserves the rest for testing/validation with zero leakage.
+    Scans the 8 single-disease classes, samples 300 images per class for training,
+    reserves test images, and adds Roboflow train images to the training split.
     """
     random.seed(seed)
     np.random.seed(seed)
     
-    single_disease_folders = [
-        "Anthracnose",
-        "Bacterial Canker",
-        "Cutting Weevil",
-        "Die Back",
-        "Gall Midge",
-        "Healthy",
-        "Powdery Mildew",
-        "Sooty Mould"
-    ]
-    
-    classes = [normalize_class_name(f) for f in single_disease_folders]
+    classes = CANONICAL_CLASSES
     class_to_idx = {c: i for i, c in enumerate(classes)}
     
     train_paths, train_labels = [], []
     val_paths, val_labels = [], []
     class_stats = {}
     
-    for folder in single_disease_folders:
-        folder_path = os.path.join(data_root, folder)
-        if not os.path.exists(folder_path):
-            raise FileNotFoundError(f"Folder not found: {folder_path}")
+    for c_name in classes:
+        folder_candidates = [c_name, "Sooty Mould" if c_name == "Sooty Mold" else c_name]
+        folder_path = None
+        for cand in folder_candidates:
+            p = os.path.join(data_root, cand)
+            if os.path.exists(p):
+                folder_path = p
+                break
+                
+        if not folder_path:
+            raise FileNotFoundError(f"Folder not found for class '{c_name}' at {data_root}")
             
         valid_exts = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.JPG', '.JPEG', '.PNG')
         all_imgs = [os.path.join(folder_path, f) for f in os.listdir(folder_path) if f.endswith(valid_exts)]
-        
         all_imgs = sorted(all_imgs)
         random.shuffle(all_imgs)
         
-        canonical_name = normalize_class_name(folder)
-        c_idx = class_to_idx[canonical_name]
-        
-        if len(all_imgs) < train_per_class:
-            raise ValueError(f"Class '{folder}' has only {len(all_imgs)} images, expected at least {train_per_class}.")
-            
+        c_idx = class_to_idx[c_name]
         selected_train = all_imgs[:train_per_class]
         selected_val = all_imgs[train_per_class:]
         
@@ -115,12 +160,17 @@ def prepare_data_splits(data_root: str, train_per_class: int = TRAIN_SAMPLES_PER
         val_paths.extend(selected_val)
         val_labels.extend([c_idx] * len(selected_val))
         
-        class_stats[canonical_name] = {
+        class_stats[c_name] = {
             "total": len(all_imgs),
             "train": len(selected_train),
             "val": len(selected_val)
         }
         
+    # Augment training set with Roboflow train split
+    rf_train_paths, rf_train_labels = load_roboflow_train_data(class_to_idx)
+    train_paths.extend(rf_train_paths)
+    train_labels.extend(rf_train_labels)
+    
     return (train_paths, train_labels), (val_paths, val_labels), classes, class_stats
 
 def save_history_to_csv(history: List[Dict], csv_path: str):
@@ -150,7 +200,7 @@ def train_and_export():
     print("\n--- Dataset Distribution Summary ---")
     for c_name, s in stats.items():
         print(f"  {c_name:18s} -> Total: {s['total']:3d} | Train: {s['train']:3d} | Test/Val: {s['val']:3d}")
-    print(f"  TOTALS: Train = {len(train_paths)} images, Test/Val = {len(val_paths)} images")
+    print(f"  TOTALS: Train = {len(train_paths)} samples, Test/Val = {len(val_paths)} images")
     print(f"  Classes: {classes}\n")
     
     train_transform = transforms.Compose([
@@ -158,7 +208,7 @@ def train_and_export():
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.3),
         transforms.RandomRotation(degrees=15),
-        transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),
         transforms.ToTensor(),
         transforms.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD)
     ])
@@ -198,103 +248,97 @@ def train_and_export():
         for epoch in range(EPOCHS):
             # Training Phase
             model.train()
-            train_loss = 0.0
-            train_correct = 0
+            running_loss = 0.0
+            correct_train = 0
+            total_train = 0
             
-            for inputs, labels in train_loader:
-                inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
+            for imgs, lbls in train_loader:
+                imgs, lbls = imgs.to(DEVICE), lbls.to(DEVICE)
                 optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
+                outputs = model(imgs)
+                loss = criterion(outputs, lbls)
                 loss.backward()
                 optimizer.step()
                 
+                running_loss += loss.item() * imgs.size(0)
                 _, preds = torch.max(outputs, 1)
-                train_loss += loss.item() * inputs.size(0)
-                train_correct += torch.sum(preds == labels.data).item()
+                correct_train += torch.sum(preds == lbls.data).item()
+                total_train += imgs.size(0)
                 
             scheduler.step()
-            train_epoch_loss = train_loss / len(train_ds)
-            train_epoch_acc = train_correct / len(train_ds)
+            train_loss = running_loss / total_train
+            train_acc = correct_train / total_train
             
-            # Validation / Test Phase on unseen data
+            # Validation Phase
             model.eval()
             val_loss = 0.0
-            val_correct = 0
-            all_preds = []
-            all_labels = []
+            all_preds, all_targets = [], []
             
             with torch.no_grad():
-                for inputs, labels in val_loader:
-                    inputs, labels = inputs.to(DEVICE), labels.to(DEVICE)
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
-                    
+                for imgs, lbls in val_loader:
+                    imgs, lbls = imgs.to(DEVICE), lbls.to(DEVICE)
+                    outputs = model(imgs)
+                    loss = criterion(outputs, lbls)
+                    val_loss += loss.item() * imgs.size(0)
                     _, preds = torch.max(outputs, 1)
-                    val_loss += loss.item() * inputs.size(0)
-                    val_correct += torch.sum(preds == labels.data).item()
-                    
                     all_preds.extend(preds.cpu().numpy())
-                    all_labels.extend(labels.cpu().numpy())
+                    all_targets.extend(lbls.cpu().numpy())
                     
-            val_epoch_loss = val_loss / len(val_ds)
-            val_epoch_acc = val_correct / len(val_ds)
+            val_loss = val_loss / len(val_ds)
+            val_acc = float(np.mean(np.array(all_preds) == np.array(all_targets)))
             
-            p = precision_score(all_labels, all_preds, average='macro', zero_division=0)
-            r = recall_score(all_labels, all_preds, average='macro', zero_division=0)
-            f1 = f1_score(all_labels, all_preds, average='macro', zero_division=0)
+            p_macro = precision_score(all_targets, all_preds, average='macro', zero_division=0)
+            r_macro = recall_score(all_targets, all_preds, average='macro', zero_division=0)
+            f1_macro = f1_score(all_targets, all_preds, average='macro', zero_division=0)
             
-            history.append({
+            epoch_log = {
                 "epoch": epoch + 1,
-                "train_loss": round(float(train_epoch_loss), 4),
-                "train_acc": round(float(train_epoch_acc), 4),
-                "val_loss": round(float(val_epoch_loss), 4),
-                "val_acc": round(float(val_epoch_acc), 4),
-                "macro_f1": round(float(f1), 4)
-            })
+                "train_loss": round(train_loss, 4),
+                "train_acc": round(train_acc, 4),
+                "val_loss": round(val_loss, 4),
+                "val_acc": round(val_acc, 4),
+                "precision": round(p_macro, 4),
+                "recall": round(r_macro, 4),
+                "f1": round(f1_macro, 4),
+            }
+            history.append(epoch_log)
+            print(f"  Epoch [{epoch+1:02d}/{EPOCHS:02d}] Train Loss: {train_loss:.4f} Acc: {train_acc:.2%} | Val Loss: {val_loss:.4f} Acc: {val_acc:.2%} | F1: {f1_macro:.4f}")
             
-            print(f"Epoch {epoch+1:2d}/{EPOCHS:2d} -> Train Loss: {train_epoch_loss:.4f} Acc: {train_epoch_acc:.2%} | Val Loss: {val_epoch_loss:.4f} Val Acc: {val_epoch_acc:.2%} | Macro F1: {f1:.4f}")
-            
-            if val_epoch_acc > best_acc:
-                best_acc = val_epoch_acc
+            if val_acc >= best_acc:
+                best_acc = val_acc
                 best_wts = copy.deepcopy(model.state_dict())
-                
-                per_class_f1 = f1_score(all_labels, all_preds, average=None, zero_division=0)
-                per_class_metrics = {classes[i]: float(per_class_f1[i]) for i in range(len(classes))}
-                
-                best_epoch_metrics = {
-                    "Accuracy": float(val_epoch_acc),
-                    "Precision": float(p),
-                    "Recall": float(r),
-                    "F1-Score": float(f1),
-                    "Epoch": epoch + 1,
-                    "PerClassF1": per_class_metrics,
-                    "ConfusionMatrix": confusion_matrix(all_labels, all_preds).tolist()
-                }
+                best_epoch_metrics = epoch_log
                 
         elapsed = time.time() - start_time
-        print(f"\n[TRAIN] {arch_name} complete in {elapsed:.1f}s. Best Unseen Test Accuracy: {best_acc:.2%}")
+        print(f"  [DONE] {arch_name} trained in {elapsed:.1f}s. Best Val Accuracy: {best_acc:.2%}")
+        
+        # Save training history CSV
+        csv_filename = os.path.join(PROJECT_ROOT, "backend", "models", f"{arch_name.lower()}_training_log.csv")
+        save_history_to_csv(history, csv_filename)
         
         trained_weights_dict[arch_name] = best_wts
-        metrics_summary[arch_name] = best_epoch_metrics
+        metrics_summary[arch_name] = {
+            "Accuracy": round(best_epoch_metrics.get("val_acc", best_acc), 4),
+            "Precision": round(best_epoch_metrics.get("precision", 0.0), 4),
+            "Recall": round(best_epoch_metrics.get("recall", 0.0), 4),
+            "F1": round(best_epoch_metrics.get("f1", 0.0), 4),
+            "FinalLoss": round(best_epoch_metrics.get("val_loss", 0.0), 4)
+        }
         
-    print(f"\n[TRAIN] Saving final model bundle to {BUNDLE_OUTPUT_PATH}...")
     bundle = {
         "models": trained_weights_dict,
         "class_names": classes,
-        "class_mapping": {i: c for i, c in enumerate(classes)},
         "metrics": metrics_summary,
-        "train_samples_per_class": TRAIN_SAMPLES_PER_CLASS,
-        "timestamp": time.time(),
         "img_size": IMG_SIZE,
-        "normalization": {
-            "mean": IMAGENET_MEAN,
-            "std": IMAGENET_STD
-        }
+        "mean": IMAGENET_MEAN,
+        "std": IMAGENET_STD,
+        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     }
+    
     torch.save(bundle, BUNDLE_OUTPUT_PATH)
-    print("✅ Model bundle successfully saved!")
-    return bundle
+    print(f"\n✅ Successfully saved multi-model bundle to '{BUNDLE_OUTPUT_PATH}'")
+    print(f"📊 Final Metrics Summary: {metrics_summary}\n")
+    return metrics_summary
 
 if __name__ == "__main__":
     train_and_export()

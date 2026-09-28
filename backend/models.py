@@ -34,9 +34,11 @@ CLASS_ALIASES = {
     "healthy": "Healthy",
     "anthracnose": "Anthracnose",
     "bacterial canker": "Bacterial Canker",
+    "bacterial cancer": "Bacterial Canker",
     "cutting weevil": "Cutting Weevil",
     "die back": "Die Back",
     "dieback": "Die Back",
+    "black die": "Die Back",
     "gall midge": "Gall Midge",
     "powdery mildew": "Powdery Mildew"
 }
