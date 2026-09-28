@@ -17,6 +17,9 @@ The platform pairs an **intelligent foliar leaf blade segmentation and chromatic
 
 ---
 
+LIVE --  https://mango-multiclass-detection-system.netlify.app/
+
+
 ## 📑 Quick Links
 - 🔬 [Research Paper Code & Visual Charts (Google Colab Ready)](model_code.md)
 - 🚀 [Quick Start Guide](#-quick-start-guide)
