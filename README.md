@@ -6,6 +6,15 @@ The system is designed to handle both **single-disease and multi-disease mango l
 
 ---
 
+
+
+LIVE --  https://mango-multiclass-detection-system.netlify.app/
+
+BACKEND - LIVE --  https://mango-multiclass-disease-detection-4.onrender.com
+
+
+
+
 ## 📌 Overview
 
 Mango crops can be affected by multiple diseases that reduce crop quality and yield. Manual identification of diseases from leaf symptoms can be difficult, especially when multiple diseases occur on the same leaf.
