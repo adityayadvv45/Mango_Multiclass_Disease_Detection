@@ -189,7 +189,7 @@ class MangoLeafInferenceEngine:
         self,
         image_bgr: np.ndarray,
         leaf_mask: np.ndarray,
-        conf_thresh: float = 0.10
+        conf_thresh: float = 0.35
     ) -> Tuple[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]:
         """
         Runs YOLOv8 lesion detection on the image.
@@ -516,9 +516,9 @@ class MangoLeafInferenceEngine:
             else:
                 avg_logits = torch.zeros((1, len(self.class_names)), device=DEVICE)
 
-            global_probs = torch.softmax(avg_logits, dim=1)[0].cpu().numpy()
+            global_probs = torch.sigmoid(avg_logits)[0].cpu().numpy()
 
-        # Map probabilities to all 8 classes
+        # Map probabilities to all canonical classes
         predictions_list = []
         for idx, cls_name in enumerate(self.class_names):
             c_meta = DISEASE_METADATA.get(cls_name, {})
@@ -535,23 +535,34 @@ class MangoLeafInferenceEngine:
         top_pred = predictions_list[0]
         top_disease_name = top_pred["name"]
         top_conf = top_pred["confidence"]
-        second_conf = predictions_list[1]["confidence"]
+        second_conf = predictions_list[1]["confidence"] if len(predictions_list) > 1 else 0.0
 
         # 4. YOLOv8 Lesion Detection (Roboflow Ground-Truth Engine)
-        yolo_by_disease, all_yolo_boxes = self.detect_yolo_lesions(image_bgr, leaf_mask, conf_thresh=0.12)
+        yolo_by_disease, all_yolo_boxes = self.detect_yolo_lesions(image_bgr, leaf_mask, conf_thresh=0.35)
         yolo_detected_classes = list(yolo_by_disease.keys())
 
         # 5. Check for Healthy Leaf
-        # Healthy if CNN predicts Healthy AND no distinct disease detected with high confidence
-        is_healthy = (top_disease_name == "Healthy") and (top_conf >= 45.0 or (second_conf < 20.0 and len(all_yolo_boxes) == 0))
+        healthy_idx = self.class_names.index("Healthy") if "Healthy" in self.class_names else -1
+        healthy_prob_pct = float(global_probs[healthy_idx]) * 100.0 if healthy_idx >= 0 else 0.0
+        disease_probs = [float(global_probs[i]) * 100.0 for i, c in enumerate(self.class_names) if c != "Healthy"]
+        max_disease_conf = max(disease_probs) if disease_probs else 0.0
+
+        is_healthy = (top_disease_name == "Healthy" and top_conf >= 35.0) or \
+                     (healthy_prob_pct >= 40.0 and max_disease_conf < 40.0 and len(yolo_by_disease) == 0) or \
+                     (max_disease_conf < 25.0 and len(yolo_by_disease) == 0)
 
         if is_healthy:
             disease_title = "Healthy"
             primary_disease_name = "Healthy"
             regions = []
             detected_disease_objects = [dict(DISEASE_METADATA["Healthy"], name="Healthy")]
-            top_pred["isDetected"] = False
-            top_pred["status"] = "Healthy (Optimal)"
+            for p in predictions_list:
+                if p["name"] == "Healthy":
+                    p["isDetected"] = True
+                    p["status"] = "Healthy (Optimal)"
+                else:
+                    p["isDetected"] = False
+                    p["status"] = "Not Detected"
             status_text = "Healthy Foliage"
             risk_level = "None"
             risk_color = "emerald"
@@ -563,32 +574,40 @@ class MangoLeafInferenceEngine:
             # Identify all genuinely present diseases from CNN consensus + YOLO evidence
             candidate_diseases = []
 
-            # 1. Primary disease is the top CNN or strong YOLO consensus
-            primary_candidate = top_disease_name
-            if top_disease_name == "Healthy" and yolo_detected_classes:
-                primary_candidate = yolo_detected_classes[0]
+            # Determine primary candidate (top disease excluding Healthy)
+            disease_preds = [p for p in predictions_list if p["name"] != "Healthy"]
+            
+            # Prioritize YOLO verified primary detection if available with high confidence
+            yolo_top_class = None
+            if len(all_yolo_boxes) > 0:
+                top_yolo_box = max(all_yolo_boxes, key=lambda b: b.get("confidence", 0))
+                if top_yolo_box.get("confidence", 0) >= 45.0:
+                    yolo_top_class = top_yolo_box.get("disease")
 
-            primary_conf = top_conf
-            for p in predictions_list:
-                if p["name"] == primary_candidate:
-                    primary_conf = p["confidence"]
-                    break
+            if yolo_top_class and any(p["name"] == yolo_top_class and p["confidence"] >= 25.0 for p in disease_preds):
+                primary_candidate = yolo_top_class
+                primary_conf = next(p["confidence"] for p in disease_preds if p["name"] == yolo_top_class)
+            else:
+                primary_candidate = disease_preds[0]["name"] if disease_preds else top_disease_name
+                primary_conf = disease_preds[0]["confidence"] if disease_preds else top_conf
 
             candidate_diseases.append((primary_candidate, primary_conf))
 
-            # 2. Add secondary diseases ONLY if genuine multi-pathology evidence exists:
-            # - YOLO explicitly detected lesions of that second disease, OR
-            # - CNN co-presence probability >= 22% and primary confidence < 80%
-            for p in predictions_list:
+            # Add secondary diseases ONLY if genuine multi-pathology evidence exists:
+            # - YOLO detected lesions for this specific disease with conf >= 0.35, OR
+            # - CNN co-presence probability >= 60.0% for this specific disease
+            for p in disease_preds:
                 d_name = p["name"]
-                if d_name == "Healthy" or d_name == primary_candidate:
+                if d_name == primary_candidate:
                     continue
 
-                has_yolo_detection = (d_name in yolo_by_disease and len(yolo_by_disease[d_name]) > 0)
-                has_strong_cnn_co = (p["confidence"] >= 22.0 and primary_conf < 80.0)
+                d_conf = p["confidence"]
+                yolo_boxes = yolo_by_disease.get(d_name, [])
+                has_yolo_evidence = len(yolo_boxes) > 0 and (d_conf >= 15.0 or any(b.get("confidence", 0) >= 40.0 for b in yolo_boxes))
+                has_strong_cnn_co = (d_conf >= 60.0 and primary_conf < 85.0)
 
-                if has_yolo_detection or has_strong_cnn_co:
-                    candidate_diseases.append((d_name, p["confidence"]))
+                if has_yolo_evidence or has_strong_cnn_co:
+                    candidate_diseases.append((d_name, d_conf))
 
             if len(candidate_diseases) > 1:
                 # Genuinely Multiple Diseases Detected

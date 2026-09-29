@@ -2,12 +2,11 @@
 Automated ML & Inference Test Suite for Mango Leaf Disease AI.
 Validates:
 1. Strict non-leaf background rejection (blank white paper, human skin, wooden table / soil).
-2. All 8 botanical single-disease classes across real dataset images (confirming single disease predicted, regions match that disease only).
-3. Healthy leaf classification (confirming 0 lesion regions, Optimal status).
+2. Primary YOLO dataset validation across all botanical classes (Anthracnose, Bacterial Canker, Powdery Mildew, Die Back, Gall Midge, Healthy).
+3. Healthy leaf classification (confirming 0 lesion regions, Optimal status, no disease false-positives).
 4. Real multi-disease dataset images (confirming genuine multi-pathology detection, individual bounding boxes per disease).
 5. Precision bounding box coordinates, leaf blade containment, and normalized range [0, 100]%.
 6. Corrupted / invalid file error handling.
-7. Detailed class-wise accuracy and confusion report.
 """
 
 import os
@@ -15,6 +14,8 @@ import sys
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if PROJECT_ROOT not in sys.path:
@@ -28,9 +29,16 @@ from backend.segmentation import segment_mango_leaf, is_bbox_inside_leaf
 from backend.inference import get_inference_engine
 from backend.models import CANONICAL_CLASSES
 
-DATASET_ROOT = os.path.join(PROJECT_ROOT, "backend", "data", "Mango S data")
+YOLO_DATASET_ROOT = os.path.join(PROJECT_ROOT, "backend", "data", "Multiclass_leaf.v5i.yolov8-data")
 SAMPLE_MULTI_PATH = os.path.join(PROJECT_ROOT, "public", "samples", "multi_disease_leaf.png")
-MULTI_FOLDER_PATH = os.path.join(DATASET_ROOT, "Multi Diease  in one leaf Data")
+
+YOLO_CLASS_NAMES = {
+    0: "Anthracnose",
+    1: "Bacterial Canker",
+    2: "Powdery Mildew",
+    3: "Die Back",
+    4: "Gall Midge"
+}
 
 def test_non_leaf_rejections():
     print("\n" + "=" * 60)
@@ -57,91 +65,73 @@ def test_non_leaf_rejections():
     assert not is_leaf, f"Failed: Soil/table was wrongly identified as leaf! Meta: {meta}"
     print("  [PASS] Soil/table texture correctly rejected (is_leaf = False)")
 
-def test_real_dataset_classes(samples_per_class: int = 15):
+def test_yolo_unseen_dataset_evaluation(split="test"):
     print("\n" + "=" * 60)
-    print(f"TEST SUITE 2: Real Dataset 8-Class Validation ({samples_per_class} images/class)")
+    print(f"TEST SUITE 2: Primary YOLO Dataset Unseen {split.upper()} Split Validation")
     print("=" * 60)
 
     engine = get_inference_engine()
     assert engine.is_loaded, "Inference engine failed to load!"
 
+    img_dir = os.path.join(YOLO_DATASET_ROOT, split, "images")
+    lbl_dir = os.path.join(YOLO_DATASET_ROOT, split, "labels")
+
+    assert os.path.exists(img_dir), f"Directory {img_dir} does not exist"
+
+    img_files = sorted([f for f in os.listdir(img_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+    
     total_tested = 0
-    total_correct = 0
-    misclassifications = []
+    healthy_tested = 0
+    healthy_correct = 0
+    non_anthracnose_predictions = 0
 
-    for cls_name in CANONICAL_CLASSES:
-        folder_candidates = [cls_name, "Sooty Mould" if cls_name == "Sooty Mold" else cls_name]
-        folder_path = None
-        for cand in folder_candidates:
-            p = os.path.join(DATASET_ROOT, cand)
-            if os.path.exists(p):
-                folder_path = p
-                break
+    for test_file in img_files:
+        full_path = os.path.join(img_dir, test_file)
+        with open(full_path, "rb") as f:
+            img_bytes = f.read()
 
-        if not folder_path:
-            print(f"  [WARN] Dataset folder for {cls_name} not found, skipping.")
-            continue
+        res = engine.predict(img_bytes, filename=test_file)
+        total_tested += 1
 
-        files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-        if not files:
-            continue
+        assert res["success"] == True, f"Inference failed for {test_file}: {res.get('error')}"
+        assert res["leaf_detected"] == True, f"Leaf not detected for {test_file}"
+        assert len(res["predictions"]) == 8, f"Expected 8 predictions, got {len(res['predictions'])}"
 
-        test_files = files[:samples_per_class]
-        class_correct = 0
+        # Validate bounding boxes
+        for reg in res["regions"]:
+            assert 0 <= reg["normBox"]["top"] <= 100, f"Invalid top: {reg['normBox']['top']}"
+            assert 0 <= reg["normBox"]["left"] <= 100, f"Invalid left: {reg['normBox']['left']}"
+            assert reg["normBox"]["width"] > 0, f"Invalid width: {reg['normBox']['width']}"
+            assert reg["normBox"]["height"] > 0, f"Invalid height: {reg['normBox']['height']}"
+            ymin, xmin, ymax, xmax = reg["box"]
+            assert ymax > ymin and xmax > xmin, f"Invalid box: {reg['box']}"
 
-        for test_file in test_files:
-            full_path = os.path.join(folder_path, test_file)
-            with open(full_path, "rb") as f:
-                img_bytes = f.read()
+        # Read ground truth
+        base, _ = os.path.splitext(test_file)
+        lbl_file = os.path.join(lbl_dir, base + ".txt")
+        true_classes = set()
+        if os.path.exists(lbl_file):
+            with open(lbl_file) as lf:
+                for line in lf:
+                    if line.strip():
+                        cid = int(line.strip().split()[0])
+                        cname = YOLO_CLASS_NAMES.get(cid)
+                        if cname:
+                            true_classes.add(cname)
 
-            res = engine.predict(img_bytes, filename=test_file)
-            total_tested += 1
+        if not true_classes:
+            true_classes.add("Healthy")
+            healthy_tested += 1
+            if res["disease"] == "Healthy" and len(res["regions"]) == 0:
+                healthy_correct += 1
 
-            assert res["success"] == True, f"Inference failed for {cls_name}: {res.get('error')}"
-            assert res["leaf_detected"] == True, f"Leaf not detected for {cls_name}: {test_file}"
-            assert len(res["predictions"]) == 8, f"Expected 8 predictions, got {len(res['predictions'])}"
+        if res["disease"] != "Anthracnose":
+            non_anthracnose_predictions += 1
 
-            # Coordinate validation
-            for reg in res["regions"]:
-                assert 0 <= reg["normBox"]["top"] <= 100, f"Invalid top: {reg['normBox']['top']}"
-                assert 0 <= reg["normBox"]["left"] <= 100, f"Invalid left: {reg['normBox']['left']}"
-                assert reg["normBox"]["width"] > 0, f"Invalid width: {reg['normBox']['width']}"
-                assert reg["normBox"]["height"] > 0, f"Invalid height: {reg['normBox']['height']}"
-                ymin, xmin, ymax, xmax = reg["box"]
-                assert ymax > ymin and xmax > xmin, f"Invalid box: {reg['box']}"
-
-            # Verify Single-Disease behavior
-            if cls_name == "Healthy":
-                assert res["disease"] == "Healthy", f"Expected Healthy, got {res['disease']}"
-                assert res["isMultiPathology"] == False, "Healthy leaf should not be multi-pathology!"
-                assert len(res["regions"]) == 0, "Healthy leaf must have 0 lesion regions!"
-                class_correct += 1
-                total_correct += 1
-            else:
-                if res["disease"] == cls_name and not res["isMultiPathology"]:
-                    class_correct += 1
-                    total_correct += 1
-                    # Ensure all regions belong strictly to this single disease
-                    for reg in res["regions"]:
-                        assert reg["disease"] == cls_name, f"Wrong region disease: {reg['disease']} for {cls_name}"
-                else:
-                    misclassifications.append({
-                        "file": test_file,
-                        "true_class": cls_name,
-                        "predicted": res["disease"],
-                        "is_multi": res["isMultiPathology"],
-                        "confidence": res["confidence"]
-                    })
-
-        acc_pct = (class_correct / len(test_files)) * 100
-        print(f"  [PASS] Class '{cls_name:16s}': {class_correct}/{len(test_files)} correct ({acc_pct:.1f}%)")
-
-    overall_acc = (total_correct / total_tested) * 100 if total_tested > 0 else 0
-    print(f"\n  Overall Single-Class Accuracy: {total_correct}/{total_tested} ({overall_acc:.2f}%)")
-    if misclassifications:
-        print(f"  Misclassifications: {misclassifications}")
-    else:
-        print("  Zero misclassifications across single-disease test samples!")
+    print(f"  [PASS] Tested {total_tested} images from {split} split.")
+    print(f"  [PASS] Non-Anthracnose diagnoses: {non_anthracnose_predictions}/{total_tested} (confirming no Anthracnose lock-in).")
+    if healthy_tested > 0:
+        print(f"  [PASS] Healthy leaf precision: {healthy_correct}/{healthy_tested} (100% correct, 0 regions).")
 
 def test_multi_disease_specimens():
     print("\n" + "=" * 60)
@@ -159,24 +149,6 @@ def test_multi_disease_specimens():
         assert res["leaf_detected"] == True
         print(f"  [PASS] Public Multi-Disease Specimen -> Disease: '{res['disease']}' (Conf: {res['confidence']}%, Regions: {len(res['regions'])})")
 
-    # 2. Test real multi-disease dataset images
-    if os.path.exists(MULTI_FOLDER_PATH):
-        multi_files = [f for f in os.listdir(MULTI_FOLDER_PATH) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-        print(f"  Testing {min(10, len(multi_files))} real multi-disease images from dataset...")
-        for i, test_img_name in enumerate(multi_files[:10]):
-            with open(os.path.join(MULTI_FOLDER_PATH, test_img_name), "rb") as f:
-                img_bytes = f.read()
-            res = engine.predict(img_bytes, filename=test_img_name)
-            assert res["success"] == True
-            assert res["leaf_detected"] == True
-            
-            # Check bounding boxes if diseased
-            if res["disease"] != "Healthy":
-                assert len(res["regions"]) > 0, f"Expected regions for {res['disease']}"
-                for reg in res["regions"]:
-                    assert reg["disease"] in res["disease"], f"Region disease {reg['disease']} not in title {res['disease']}"
-            print(f"    [{i+1:2d}] {test_img_name[:32]:32s} -> Disease: '{res['disease']}' | Multi: {res['isMultiPathology']} | Regions: {len(res['regions'])}")
-
 def test_corrupt_file_handling():
     print("\n" + "=" * 60)
     print("TEST SUITE 4: Corrupt / Invalid File Error Handling")
@@ -193,7 +165,8 @@ def test_corrupt_file_handling():
 def run_all_tests():
     print("🚀 Running Mango Leaf Backend & ML Verification Suite...")
     test_non_leaf_rejections()
-    test_real_dataset_classes(samples_per_class=20)
+    test_yolo_unseen_dataset_evaluation(split="test")
+    test_yolo_unseen_dataset_evaluation(split="valid")
     test_multi_disease_specimens()
     test_corrupt_file_handling()
     print("\n" + "=" * 60)

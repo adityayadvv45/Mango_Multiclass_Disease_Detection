@@ -1,10 +1,11 @@
+path: C:/Users/adity/Desktop/MangoLeaf/backend/data/Multiclass_leaf.v5i.yolov8-data
 train: train/images
 val: valid/images
 test: test/images
 
 names: 
   0: Anthracnose
-  1: Bacterial Cancer
+  1: Bacterial Canker
   2: Powdery Mildew
-  3: black die
-  4: gall midge
+  3: Die Back
+  4: Gall Midge
