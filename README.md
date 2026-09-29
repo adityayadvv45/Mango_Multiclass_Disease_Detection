@@ -130,34 +130,48 @@ The current detection pipeline is based on a **YOLO object-detection model train
 ## 📂 Project Structure
 
 ```text
-Mango_Multiclass_Disease_Detection/
-│
-├── backend/
-│   ├── models/
-│   │   └── trained_model.pt
-│   │
-│   ├── routes/
-│   ├── services/
-│   ├── utils/
-│   ├── app.py
-│   └── requirements.txt
-│
-├── frontend/
-│   ├── src/
-│   ├── public/
-│   ├── package.json
-│   └── ...
-│
-├── training/
-│   ├── train_yolov8.py
-│   ├── dataset.yaml
-│   └── ...
-│
-├── datasets/
-│   └── README.md
-│
-├── README.md
-└── .gitignore
+MangoLeaf/
+├── backend/                               # High-Performance FastAPI + PyTorch Backend
+│   ├── main.py                            # FastAPI REST application & endpoints
+│   ├── inference.py                       # Core multi-pathology vision inference engine
+│   ├── models.py                          # Neural network backbones, metadata & configs
+│   ├── segmentation.py                    # Foliar leaf blade segmentation & rejection
+│   ├── requirements.txt                   # Python backend dependencies
+│   ├── models/                            # Production model weights & logs
+│   │   ├── mango_yolo.pt                  # Active YOLOv8 lesion localization model
+│   │   ├── mango_model_bundle.pth         # Active Dual CNN consensus weights
+│   │   ├── efficientnet-b0_training_log.csv
+│   │   └── mobilenetv3-large_training_log.csv
+│   ├── training/                          # Model reproducibility pipelines
+│   │   ├── train_pipeline.py              # Dual CNN consensus training script
+│   │   └── train_yolo.py                  # YOLOv8-OBB fine-tuning script
+│   ├── tests/                             # Automated test suite
+│   │   ├── test_inference.py              # Full ML inference validation suite
+│   │   ├── test_api.py                    # FastAPI REST endpoint integration tests
+│   │   └── test_roboflow_validation.py    # Roboflow dataset validation benchmark
+│   └── data/                              # Foliar datasets
+│       ├── README.md                      # Dataset separation & formatting guide
+│       ├── Multiclass_leaf.v5i.yolov8-data/ # Active YOLOv8 lesion dataset
+│       └── Mango S data/                  # Legacy Kaggle multi-class dataset
+├── src/                                   # Modern React 19 Frontend (Vite + Tailwind CSS v4)
+│   ├── components/                        # Reusable UI components & modals
+│   ├── pages/                             # Dashboard & analysis views
+│   ├── services/                          # API communication layer
+│   ├── assets/                            # Static icons & UI graphics
+│   └── data/                              # Treatment guides & remedies
+├── public/                                # Public assets & curated leaf samples
+│   ├── samples/                           # Sample specimens for instant testing
+│   ├── favicon.svg
+│   └── icons.svg
+├── documentation/                         # Technical & research documentation
+│   ├── architecture_overview.md           # System architecture overview
+│   └── research_charts_and_code.md        # Research chart & Colab scripts
+├── Dockerfile                             # Container deployment definition
+├── render.yaml                            # Cloud deployment configuration
+├── package.json                           # NPM scripts & frontend dependencies
+├── requirements.txt                       # Unified Python dependencies
+└── README.md                              # Main project documentation
+
 ```
 
 > The exact folder structure may differ depending on the current project implementation.
