@@ -162,6 +162,38 @@ def test_corrupt_file_handling():
     assert "Corrupted or invalid" in res["error"] or "No mango leaf" in res["error"]
     print(f"  [PASS] Corrupted file handled gracefully: error = '{res['error']}'")
 
+def test_healthy_leaf_diagnoses():
+    print("\n" + "=" * 60)
+    print("TEST SUITE 5: Healthy Foliage Real Leaf Validation")
+    print("=" * 60)
+
+    engine = get_inference_engine()
+    healthy_dir = os.path.join(PROJECT_ROOT, "backend", "data", "Mango S data", "Healthy")
+    
+    if os.path.exists(healthy_dir):
+        # Specific user test image
+        user_test_file = "20211231_123247 (Custom).jpg"
+        user_path = os.path.join(healthy_dir, user_test_file)
+        if os.path.exists(user_path):
+            with open(user_path, "rb") as f:
+                res = engine.predict(f.read(), filename=user_test_file)
+            assert res["success"] == True, f"Failed for {user_test_file}: {res.get('error')}"
+            assert res["disease"] == "Healthy", f"Expected Healthy for {user_test_file}, got {res['disease']}"
+            assert res["status"] == "Healthy Foliage", f"Expected Healthy Foliage, got {res['status']}"
+            assert len(res["regions"]) == 0, f"Expected 0 regions for {user_test_file}, got {len(res['regions'])}"
+            print(f"  [PASS] Target User Specimen '{user_test_file}' -> {res['disease']} ({res['status']}, {len(res['regions'])} regions, Conf: {res['confidence']}%)")
+
+        # Test sample of healthy files
+        h_files = [f for f in os.listdir(healthy_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))][:30]
+        correct_count = 0
+        for f in h_files:
+            with open(os.path.join(healthy_dir, f), "rb") as fp:
+                res = engine.predict(fp.read(), filename=f)
+            if res["disease"] == "Healthy" and len(res["regions"]) == 0:
+                correct_count += 1
+        print(f"  [PASS] Healthy leaf validation: {correct_count}/{len(h_files)} correctly diagnosed as Healthy Foliage (0 regions).")
+        assert correct_count >= 28, f"Too many false positives: {correct_count}/{len(h_files)}"
+
 def run_all_tests():
     print("🚀 Running Mango Leaf Backend & ML Verification Suite...")
     test_non_leaf_rejections()
@@ -169,6 +201,7 @@ def run_all_tests():
     test_yolo_unseen_dataset_evaluation(split="valid")
     test_multi_disease_specimens()
     test_corrupt_file_handling()
+    test_healthy_leaf_diagnoses()
     print("\n" + "=" * 60)
     print("🎉 ALL TEST SUITES PASSED PERFECTLY!")
     print("=" * 60)

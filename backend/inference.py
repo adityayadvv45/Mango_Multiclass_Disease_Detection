@@ -205,6 +205,7 @@ class MangoLeafInferenceEngine:
                 return {}, []
 
         h, w = image_bgr.shape[:2]
+        leaf_area = np.count_nonzero(leaf_mask)
         disease_to_boxes: Dict[str, List[Dict[str, Any]]] = {}
         all_boxes: List[Dict[str, Any]] = []
 
@@ -234,7 +235,17 @@ class MangoLeafInferenceEngine:
                     ymax = max(ymin + 5, min(int(ymax), h))
                     xmax = max(xmin + 5, min(int(xmax), w))
 
-                    if is_bbox_inside_leaf((ymin, xmin, ymax, xmax), leaf_mask, min_overlap_ratio=0.08):
+                    box_w = xmax - xmin
+                    box_h = ymax - ymin
+                    box_area = box_w * box_h
+
+                    # Reject degenerate noise boxes (< 10px or < 0.1% leaf area) and full-leaf boxes (> 55% leaf area)
+                    if box_w < 10 or box_h < 10:
+                        continue
+                    if leaf_area > 0 and (box_area < 0.001 * leaf_area or box_area > 0.55 * leaf_area):
+                        continue
+
+                    if is_bbox_inside_leaf((ymin, xmin, ymax, xmax), leaf_mask, min_overlap_ratio=0.10):
                         norm_top = round((ymin / float(h)) * 100.0, 2)
                         norm_left = round((xmin / float(w)) * 100.0, 2)
                         norm_width = round(((xmax - xmin) / float(w)) * 100.0, 2)
@@ -275,7 +286,17 @@ class MangoLeafInferenceEngine:
                     ymax = max(ymin + 5, min(int(ymax), h))
                     xmax = max(xmin + 5, min(int(xmax), w))
 
-                    if is_bbox_inside_leaf((ymin, xmin, ymax, xmax), leaf_mask, min_overlap_ratio=0.08):
+                    box_w = xmax - xmin
+                    box_h = ymax - ymin
+                    box_area = box_w * box_h
+
+                    # Reject degenerate noise boxes (< 10px or < 0.1% leaf area) and full-leaf boxes (> 55% leaf area)
+                    if box_w < 10 or box_h < 10:
+                        continue
+                    if leaf_area > 0 and (box_area < 0.001 * leaf_area or box_area > 0.55 * leaf_area):
+                        continue
+
+                    if is_bbox_inside_leaf((ymin, xmin, ymax, xmax), leaf_mask, min_overlap_ratio=0.10):
                         norm_top = round((ymin / float(h)) * 100.0, 2)
                         norm_left = round((xmin / float(w)) * 100.0, 2)
                         norm_width = round(((xmax - xmin) / float(w)) * 100.0, 2)
@@ -317,6 +338,7 @@ class MangoLeafInferenceEngine:
         Extracts high-precision localized lesion bounding boxes on the leaf blade.
         Prioritizes YOLOv8 ground-truth lesion boxes if available, and uses
         class-specific Grad-CAM + morphological lesion segmentation as fallback.
+        Never fabricates full-leaf bounding boxes if no genuine focal lesions exist.
         """
         if disease_class_name == "Healthy":
             return []
@@ -327,6 +349,7 @@ class MangoLeafInferenceEngine:
 
         h, w = image_bgr.shape[:2]
         img_area = h * w
+        leaf_area = np.count_nonzero(leaf_mask)
 
         # 1. Compute Class-Specific Grad-CAM Attention
         cam_engine = self.grad_cam_engines.get("EfficientNet-B0") or next(iter(self.grad_cam_engines.values()), None)
@@ -345,52 +368,56 @@ class MangoLeafInferenceEngine:
         blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, k_bh)
 
         if disease_class_name in ["Anthracnose", "Gall Midge"]:
-            lesion_mask = ((blackhat > 10) | (hsv[:, :, 2] < 100)) & (leaf_mask > 0)
+            lesion_mask = ((blackhat > 12) | (hsv[:, :, 2] < 90)) & (leaf_mask > 0)
         elif disease_class_name == "Bacterial Canker":
             halo = (hsv[:, :, 0] >= 10) & (hsv[:, :, 0] <= 36) & (hsv[:, :, 1] >= 35) & (hsv[:, :, 2] >= 45)
-            lesion_mask = (halo | (blackhat > 8) | (hsv[:, :, 2] < 90)) & (leaf_mask > 0)
+            lesion_mask = (halo | (blackhat > 10) | (hsv[:, :, 2] < 85)) & (leaf_mask > 0)
         elif disease_class_name == "Powdery Mildew":
-            lesion_mask = ((hsv[:, :, 2] > 130) & (hsv[:, :, 1] < 50)) & (leaf_mask > 0)
+            lesion_mask = ((hsv[:, :, 2] > 140) & (hsv[:, :, 1] < 45)) & (leaf_mask > 0)
         elif disease_class_name == "Sooty Mold":
-            lesion_mask = (hsv[:, :, 2] < 80) & (hsv[:, :, 1] > 10) & (leaf_mask > 0)
+            lesion_mask = (hsv[:, :, 2] < 70) & (hsv[:, :, 1] > 15) & (leaf_mask > 0)
         elif disease_class_name == "Die Back":
-            lesion_mask = ((hsv[:, :, 0] >= 6) & (hsv[:, :, 0] <= 28) & (hsv[:, :, 1] >= 25)) & (leaf_mask > 0)
+            lesion_mask = ((hsv[:, :, 0] >= 6) & (hsv[:, :, 0] <= 28) & (hsv[:, :, 1] >= 30)) & (leaf_mask > 0)
         else:  # Cutting Weevil / general foliar pathology
-            lesion_mask = (leaf_mask > 0)
+            lesion_mask = (leaf_mask > 0) & (blackhat > 10)
 
         # 3. Fuse Grad-CAM attention with lesion mask
         cam_max = float(np.max(cam_masked)) if np.max(cam_masked) > 0 else 1.0
-        cam_thresh = max(0.12, cam_max * 0.35)
+        cam_thresh = max(0.20, cam_max * 0.40)
         high_cam = (cam_masked >= cam_thresh)
 
         fused = (lesion_mask & high_cam).astype(np.uint8) * 255
-        if np.count_nonzero(fused) < 80:
-            fused = high_cam.astype(np.uint8) * 255
+        if np.count_nonzero(fused) < 60:
+            return []
 
         k_group = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
         fused_grouped = cv2.morphologyEx(fused, cv2.MORPH_CLOSE, k_group, iterations=2)
 
         contours, _ = cv2.findContours(fused_grouped, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
-            contours, _ = cv2.findContours(high_cam.astype(np.uint8) * 255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            return []
 
         raw_boxes = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area < 30:
+            if area < 40:
                 continue
             bx, by, bw, bh = cv2.boundingRect(cnt)
-            if (bw * bh) > 0.45 * img_area and len(contours) > 1:
+            
+            # Reject boxes that cover too much of the leaf (focal lesion constraint)
+            if (bw * bh) > 0.40 * img_area or (leaf_area > 0 and (bw * bh) > 0.45 * leaf_area):
+                continue
+            if bw < 12 or bh < 12:
                 continue
 
-            pad_x = max(8, int(bw * 0.15))
-            pad_y = max(8, int(bh * 0.15))
+            pad_x = max(6, int(bw * 0.12))
+            pad_y = max(6, int(bh * 0.12))
             ymin = max(0, by - pad_y)
             xmin = max(0, bx - pad_x)
             ymax = min(h, by + bh + pad_y)
             xmax = min(w, bx + bw + pad_x)
 
-            if is_bbox_inside_leaf((ymin, xmin, ymax, xmax), leaf_mask, min_overlap_ratio=0.10):
+            if is_bbox_inside_leaf((ymin, xmin, ymax, xmax), leaf_mask, min_overlap_ratio=0.15):
                 box_cam_score = float(np.mean(cam_masked[ymin:ymax, xmin:xmax]))
                 raw_boxes.append((ymin, xmin, ymax, xmax, area, box_cam_score))
 
@@ -418,19 +445,6 @@ class MangoLeafInferenceEngine:
                 if len(final_boxes) >= 4:
                     break
 
-        # Fallback if no box found: create focal box on strongest leaf lesion area
-        if not final_boxes and np.count_nonzero(leaf_mask) > 0:
-            y_pts, x_pts = np.where(leaf_mask > 0)
-            if len(y_pts) > 0:
-                pad_h = int((np.max(y_pts) - np.min(y_pts)) * 0.25)
-                pad_w = int((np.max(x_pts) - np.min(x_pts)) * 0.25)
-                ymin = max(0, int(np.min(y_pts)) + pad_h // 2)
-                xmin = max(0, int(np.min(x_pts)) + pad_w // 2)
-                ymax = min(h, int(np.max(y_pts)) - pad_h // 2)
-                xmax = min(w, int(np.max(x_pts)) - pad_w // 2)
-                if ymax > ymin and xmax > xmin:
-                    final_boxes.append((ymin, xmin, ymax, xmax, 0, 1.0))
-
         boxes = []
         for ymin, xmin, ymax, xmax, _, _ in final_boxes:
             norm_top = round((ymin / float(h)) * 100.0, 2)
@@ -457,8 +471,8 @@ class MangoLeafInferenceEngine:
         Executes end-to-end diagnosis:
         1. Leaf segmentation & background / non-leaf rejection
         2. Deep CNN 8-class consensus classification
-        3. YOLOv8 lesion localization on Roboflow ground truth
-        4. Calibrated single-disease vs. multi-disease decision logic
+        3. Calibrated YOLOv8 lesion detection and localization
+        4. Evidence-grounded single-disease vs. multi-disease decision logic
         """
         t0 = time.time()
 
@@ -501,6 +515,8 @@ class MangoLeafInferenceEngine:
                 "segmentation": seg_meta
             }
 
+        leaf_area = np.count_nonzero(leaf_mask)
+
         # 3. Deep CNN Consensus Classification over the Validated Leaf Specimen
         leaf_rgb = Image.fromarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB))
         input_tensor = preprocess_image_for_model(leaf_rgb).to(DEVICE)
@@ -532,30 +548,68 @@ class MangoLeafInferenceEngine:
             })
 
         predictions_list.sort(key=lambda x: x["confidence"], reverse=True)
-        top_pred = predictions_list[0]
-        top_disease_name = top_pred["name"]
-        top_conf = top_pred["confidence"]
-        second_conf = predictions_list[1]["confidence"] if len(predictions_list) > 1 else 0.0
+        
+        healthy_idx = self.class_names.index("Healthy") if "Healthy" in self.class_names else -1
+        healthy_prob_pct = float(global_probs[healthy_idx]) * 100.0 if healthy_idx >= 0 else 0.0
 
         # 4. YOLOv8 Lesion Detection (Roboflow Ground-Truth Engine)
         yolo_by_disease, all_yolo_boxes = self.detect_yolo_lesions(image_bgr, leaf_mask, conf_thresh=0.35)
-        yolo_detected_classes = list(yolo_by_disease.keys())
 
-        # 5. Check for Healthy Leaf
-        healthy_idx = self.class_names.index("Healthy") if "Healthy" in self.class_names else -1
-        healthy_prob_pct = float(global_probs[healthy_idx]) * 100.0 if healthy_idx >= 0 else 0.0
-        disease_probs = [float(global_probs[i]) * 100.0 for i, c in enumerate(self.class_names) if c != "Healthy"]
-        max_disease_conf = max(disease_probs) if disease_probs else 0.0
+        # 5. Evidence-Grounded Disease Candidate Identification
+        # Rule: A disease prediction MUST have genuine physical lesion or verified localized evidence.
+        yolo_supported = {"Anthracnose", "Bacterial Canker", "Powdery Mildew", "Die Back", "Gall Midge"}
+        candidate_diseases = []
+        disease_regions: Dict[str, List[Dict[str, Any]]] = {}
 
-        is_healthy = (top_disease_name == "Healthy" and top_conf >= 35.0) or \
-                     (healthy_prob_pct >= 40.0 and max_disease_conf < 40.0 and len(yolo_by_disease) == 0) or \
-                     (max_disease_conf < 25.0 and len(yolo_by_disease) == 0)
+        # 5a. Primary candidate from YOLO detections
+        for d_name, boxes in yolo_by_disease.items():
+            conf = next((p["confidence"] for p in predictions_list if p["name"] == d_name), boxes[0]["confidence"])
+            candidate_diseases.append((d_name, conf))
+            disease_regions[d_name] = boxes
 
-        if is_healthy:
+        # 5b. For non-YOLO diseases (Cutting Weevil, Sooty Mold) or overwhelming CNN consensus (>= 80%)
+        disease_preds = [p for p in predictions_list if p["name"] != "Healthy"]
+        for p in disease_preds:
+            d_name = p["name"]
+            d_conf = p["confidence"]
+            if d_name in disease_regions:
+                continue
+
+            # Non-YOLO diseases with strong CNN evidence (> 75% and > healthy + 25%)
+            if d_name not in yolo_supported and d_conf >= 75.0 and d_conf > (healthy_prob_pct + 25.0):
+                c_idx = self.class_names.index(d_name) if d_name in self.class_names else 0
+                cam_boxes = self.extract_disease_bounding_boxes(
+                    image_bgr, leaf_mask, input_tensor, d_name, c_idx, d_conf, yolo_boxes_for_disease=[]
+                )
+                if cam_boxes:
+                    candidate_diseases.append((d_name, d_conf))
+                    disease_regions[d_name] = cam_boxes
+
+            # YOLO-supported disease with high CNN probability (>= 85%) and no YOLO detections
+            elif len(all_yolo_boxes) == 0 and d_conf >= 85.0 and d_conf > (healthy_prob_pct + 35.0):
+                c_idx = self.class_names.index(d_name) if d_name in self.class_names else 0
+                cam_boxes = self.extract_disease_bounding_boxes(
+                    image_bgr, leaf_mask, input_tensor, d_name, c_idx, d_conf, yolo_boxes_for_disease=[]
+                )
+                if cam_boxes:
+                    candidate_diseases.append((d_name, d_conf))
+                    disease_regions[d_name] = cam_boxes
+
+        candidate_diseases.sort(key=lambda x: x[1], reverse=True)
+
+        # 6. Diagnostic Decision & Response Assembly
+        if len(candidate_diseases) == 0:
+            # HEALTHY FOLIAGE (No genuine disease lesion evidence detected)
             disease_title = "Healthy"
             primary_disease_name = "Healthy"
+            status_text = "Healthy Foliage"
+            risk_level = "None"
+            risk_color = "emerald"
+            badge_bg = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+            summary_text = "Foliar specimen shows uniform chlorophyll density, intact cellular margins, and absence of pathogenic lesion boundaries."
+            is_multi = False
             regions = []
-            detected_disease_objects = [dict(DISEASE_METADATA["Healthy"], name="Healthy")]
+
             for p in predictions_list:
                 if p["name"] == "Healthy":
                     p["isDetected"] = True
@@ -563,117 +617,71 @@ class MangoLeafInferenceEngine:
                 else:
                     p["isDetected"] = False
                     p["status"] = "Not Detected"
-            status_text = "Healthy Foliage"
-            risk_level = "None"
-            risk_color = "emerald"
-            badge_bg = "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
-            summary_text = "Foliar specimen shows uniform chlorophyll density, intact cellular margins, and absence of pathogenic lesion boundaries."
+
+            detected_disease_objects = [dict(DISEASE_METADATA["Healthy"], name="Healthy")]
+            final_conf = round(max(healthy_prob_pct, predictions_list[0]["confidence"] if predictions_list[0]["name"] == "Healthy" else 85.0), 1)
+
+        elif len(candidate_diseases) == 1:
+            # SINGLE DISEASE DETECTED
             is_multi = False
+            primary_disease_name = candidate_diseases[0][0]
+            primary_conf = candidate_diseases[0][1]
+            disease_title = primary_disease_name
+            primary_meta = DISEASE_METADATA.get(primary_disease_name, {})
+            status_text = "Disease Detected"
+            risk_level = primary_meta.get("risk", "High")
+            risk_color = primary_meta.get("riskColor", "rose")
+            badge_bg = primary_meta.get("badgeBg", "bg-rose-500/10 text-rose-400 border-rose-500/30")
+            detected_disease_objects = [dict(primary_meta, name=primary_disease_name)]
+
+            for p in predictions_list:
+                if p["name"] == primary_disease_name:
+                    p["isDetected"] = True
+                    p["status"] = "Detected"
+                else:
+                    p["isDetected"] = False
+                    p["status"] = "Not Detected"
+
+            regs = disease_regions.get(primary_disease_name, [])
+            for i, r in enumerate(regs):
+                r["id"] = i + 1
+            regions = regs
+            final_conf = primary_conf
+            summary_text = f"Focal lesion regions characteristic of {primary_disease_name} identified with {primary_conf}% confidence."
+
         else:
-            # 6. Multi-Disease vs. Single-Disease Diagnostic Decision
-            # Identify all genuinely present diseases from CNN consensus + YOLO evidence
-            candidate_diseases = []
+            # MULTIPLE DISEASES DETECTED
+            is_multi = True
+            detected_names = [d[0] for d in candidate_diseases]
+            primary_disease_name = detected_names[0]
+            disease_title = " + ".join(detected_names)
+            status_text = "Multiple Diseases Detected"
+            risk_level = "High"
+            risk_color = "rose"
+            badge_bg = "bg-rose-500/10 text-rose-400 border-rose-500/30"
+            detected_disease_objects = [
+                dict(DISEASE_METADATA.get(d_name, {}), name=d_name)
+                for d_name in detected_names
+            ]
 
-            # Determine primary candidate (top disease excluding Healthy)
-            disease_preds = [p for p in predictions_list if p["name"] != "Healthy"]
-            
-            # Prioritize YOLO verified primary detection if available with high confidence
-            yolo_top_class = None
-            if len(all_yolo_boxes) > 0:
-                top_yolo_box = max(all_yolo_boxes, key=lambda b: b.get("confidence", 0))
-                if top_yolo_box.get("confidence", 0) >= 45.0:
-                    yolo_top_class = top_yolo_box.get("disease")
+            for p in predictions_list:
+                if p["name"] in detected_names:
+                    p["isDetected"] = True
+                    p["status"] = "Detected"
+                else:
+                    p["isDetected"] = False
+                    p["status"] = "Not Detected"
 
-            if yolo_top_class and any(p["name"] == yolo_top_class and p["confidence"] >= 25.0 for p in disease_preds):
-                primary_candidate = yolo_top_class
-                primary_conf = next(p["confidence"] for p in disease_preds if p["name"] == yolo_top_class)
-            else:
-                primary_candidate = disease_preds[0]["name"] if disease_preds else top_disease_name
-                primary_conf = disease_preds[0]["confidence"] if disease_preds else top_conf
+            regions = []
+            reg_id = 1
+            for d_name in detected_names:
+                for r in disease_regions.get(d_name, []):
+                    r["id"] = reg_id
+                    regions.append(r)
+                    reg_id += 1
 
-            candidate_diseases.append((primary_candidate, primary_conf))
-
-            # Add secondary diseases ONLY if genuine multi-pathology evidence exists:
-            # - YOLO detected lesions for this specific disease with conf >= 0.35, OR
-            # - CNN co-presence probability >= 60.0% for this specific disease
-            for p in disease_preds:
-                d_name = p["name"]
-                if d_name == primary_candidate:
-                    continue
-
-                d_conf = p["confidence"]
-                yolo_boxes = yolo_by_disease.get(d_name, [])
-                has_yolo_evidence = len(yolo_boxes) > 0 and (d_conf >= 15.0 or any(b.get("confidence", 0) >= 40.0 for b in yolo_boxes))
-                has_strong_cnn_co = (d_conf >= 60.0 and primary_conf < 85.0)
-
-                if has_yolo_evidence or has_strong_cnn_co:
-                    candidate_diseases.append((d_name, d_conf))
-
-            if len(candidate_diseases) > 1:
-                # Genuinely Multiple Diseases Detected
-                is_multi = True
-                detected_disease_names = [d[0] for d in candidate_diseases]
-                primary_disease_name = detected_disease_names[0]
-                disease_title = " + ".join(detected_disease_names)
-                detected_disease_objects = [
-                    dict(DISEASE_METADATA.get(d_name, {}), name=d_name)
-                    for d_name in detected_disease_names
-                ]
-                status_text = "Multiple Diseases Detected"
-                risk_level = "High"
-                risk_color = "rose"
-                badge_bg = "bg-rose-500/10 text-rose-400 border-rose-500/30"
-
-                for p in predictions_list:
-                    if p["name"] in detected_disease_names:
-                        p["isDetected"] = True
-                        p["status"] = "Detected"
-
-                # Extract lesion bounding boxes for EACH detected disease
-                regions = []
-                region_id = 1
-                for d_name, d_conf in candidate_diseases:
-                    c_idx = self.class_names.index(d_name) if d_name in self.class_names else 0
-                    d_yolo = yolo_by_disease.get(d_name, [])
-                    d_boxes = self.extract_disease_bounding_boxes(
-                        image_bgr, leaf_mask, input_tensor, d_name, c_idx, d_conf, yolo_boxes_for_disease=d_yolo
-                    )
-                    for b in d_boxes:
-                        b["id"] = region_id
-                        regions.append(b)
-                        region_id += 1
-
-                summary_text = f"Multiple foliar co-infections identified on the leaf blade: {disease_title}. Individual lesion regions localized and classified independently."
-
-            else:
-                # Single Disease Detected
-                is_multi = False
-                primary_disease_name = primary_candidate
-                disease_title = primary_disease_name
-                primary_meta = DISEASE_METADATA.get(primary_disease_name, {})
-                detected_disease_objects = [dict(primary_meta, name=primary_disease_name)]
-                status_text = "Disease Detected"
-                risk_level = primary_meta.get("risk", "High")
-                risk_color = primary_meta.get("riskColor", "rose")
-                badge_bg = primary_meta.get("badgeBg", "bg-rose-500/10 text-rose-400 border-rose-500/30")
-
-                for p in predictions_list:
-                    if p["name"] == primary_disease_name:
-                        p["isDetected"] = True
-                        p["status"] = "Detected"
-
-                # Extract lesion bounding boxes strictly attributed to this single disease
-                c_idx = self.class_names.index(primary_disease_name) if primary_disease_name in self.class_names else 0
-                d_yolo = yolo_by_disease.get(primary_disease_name, [])
-                d_boxes = self.extract_disease_bounding_boxes(
-                    image_bgr, leaf_mask, input_tensor, primary_disease_name, c_idx, primary_conf, yolo_boxes_for_disease=d_yolo
-                )
-                regions = []
-                for i, b in enumerate(d_boxes):
-                    b["id"] = i + 1
-                    regions.append(b)
-
-                summary_text = f"Focal lesion regions characteristic of {primary_disease_name} identified with {primary_conf}% consensus confidence."
+            final_conf = candidate_diseases[0][1]
+            summary_text = f"Multiple foliar co-infections identified on the leaf blade: {disease_title}. Individual lesion regions localized and classified independently."
 
         primary_meta = DISEASE_METADATA.get(primary_disease_name, DISEASE_METADATA["Healthy"])
         inference_time_ms = int((time.time() - t0) * 1000)
@@ -691,7 +699,7 @@ class MangoLeafInferenceEngine:
             "activeDiseaseIndex": 0,
             "scientificName": primary_meta.get("scientificName", "Mangifera indica"),
             "category": primary_meta.get("category", "Fungal"),
-            "confidence": top_conf,
+            "confidence": final_conf,
             "status": status_text,
             "risk": risk_level,
             "riskColor": risk_color,
