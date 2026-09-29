@@ -1,328 +1,530 @@
+# 🥭 Mango Multiclass Disease Detection
 
+An AI-based mango leaf disease detection system that uses **deep learning and computer vision** to identify diseases present on mango leaves and localize affected regions using bounding boxes.
 
-# 🥭 Mango AI — Mango_Multiclass_Disease_Detection
-
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-5.0-646CFF?logo=vite&logoColor=white)](https://vitejs.dev/)
-[![Accuracy](https://img.shields.io/badge/Test%20Accuracy-99.94%25-brightgreen)](https://github.com/adityayadvv45/Mango_Multiclass_Disease_Detection)
-[![Research Paper](https://img.shields.io/badge/Research-Paper%20Artifacts-orange?logo=googlescholar&logoColor=white)](model_code.md)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-
-**Mango Guard AI** is an advanced, production-grade Deep Learning system engineered for real-time diagnosis of **single and multiple simultaneous diseases** on mango tree foliage (*Mangifera indica*).
-
-The platform pairs an **intelligent foliar leaf blade segmentation and chromatic background rejection engine** with a **dual-backbone deep neural network consensus model** (EfficientNet-B0 + MobileNetV3-Large) and a **region-level lesion localization pipeline**.
+The system is designed to handle both **single-disease and multi-disease mango leaves**, providing disease predictions along with the location of detected disease regions.
 
 ---
 
-LIVE --  https://mango-multiclass-detection-system.netlify.app/
+## 📌 Overview
 
-BACKEND - LIVE --  https://mango-multiclass-disease-detection-4.onrender.com
+Mango crops can be affected by multiple diseases that reduce crop quality and yield. Manual identification of diseases from leaf symptoms can be difficult, especially when multiple diseases occur on the same leaf.
 
-## 📑 Quick Links
-- 🔬 [Research Paper Code & Visual Charts (Google Colab Ready)](model_code.md)
-- 🚀 [Quick Start Guide](#-quick-start-guide)
-- 📊 [Model Benchmark & Metrics](#-model-benchmarks--experimental-results)
-- 📡 [REST API Documentation](#-api-reference)
-- 🛡️ [Botanical Pathology Guide](#-botanical-disease-reference)
+This project uses computer vision and deep learning to automatically analyze mango leaf images and:
 
----
+* Detect disease-affected regions
+* Identify the corresponding disease classes
+* Localize detected diseases using bounding boxes
+* Support multiple disease detections on a single leaf
+* Provide confidence scores for predictions
 
-## 🌟 Key Capabilities
-
-- **8-Class Botanical Disease Classification**:
-  - `Anthracnose` (*Colletotrichum gloeosporioides*)
-  - `Bacterial Canker` (*Xanthomonas campestris pv. mangiferaeindicae*)
-  - `Cutting Weevil` (*Deporaus marginatus*)
-  - `Die Back` (*Lasiodiplodia theobromae*)
-  - `Gall Midge` (*Procontarinia matteiana*)
-  - `Healthy Foliage` (*Physiologically optimal foliage*)
-  - `Powdery Mildew` (*Oidium mangiferae*)
-  - `Sooty Mold` (*Capnodium mangiferae / Meliola spp.*)
-- **Multi-Disease Co-Infection Detection**: Detects and delineates multiple concurrent diseases on a single leaf blade without artificial heuristics.
-- **Lesion Localization Engine**: Extracts and bounds genuine lesion regions strictly within the segmented leaf contour.
-- **Robust Background & Non-Leaf Rejection**: Automatically rejects non-leaf inputs (hands, fingers, notebook paper, desks, soil, and wall textures) to prevent false positives.
-- **Interactive React Dashboard**: Modern glassmorphic UI with dynamic leaf overlays, disease pill switching, and actionable agronomic treatments.
+The current detection pipeline is based on a **YOLO object-detection model trained using annotated mango leaf images**.
 
 ---
 
-## 🔬 System Architecture & Inference Pipeline
+## 🚀 Features
+
+* 🌿 Mango leaf disease detection
+* 🔍 Disease localization using bounding boxes
+* 🦠 Multi-class disease detection
+* 🦠 Multiple disease detection on a single leaf
+* 📊 Confidence scores for predictions
+* 🖼️ Image-based inference
+* ⚡ REST API for model inference
+* 🧠 Deep-learning based computer vision
+* 📱 Web-based interface
+* ☁️ Deployable frontend and backend architecture
+
+---
+
+## 🧠 Technology Stack
+
+### Machine Learning / Computer Vision
+
+* Python
+* PyTorch
+* Ultralytics YOLOv8
+* OpenCV
+* NumPy
+* Pandas
+* Matplotlib
+
+### Backend
+
+* Python
+* Flask
+* REST API
+* Gunicorn
+
+### Frontend
+
+* React.js
+* JavaScript
+* HTML
+* CSS
+
+### Deployment
+
+* Netlify — Frontend
+* Render — Backend
+
+### Development
+
+* Git
+* GitHub
+* Google Colab
+* VS Code
+
+---
+
+## 🏗️ System Architecture
 
 ```text
-                     ┌────────────────────────────────┐
-                     │       Uploaded Leaf Image      │
-                     └───────────────┬────────────────┘
-                                     ▼
-                     ┌────────────────────────────────┐
-                     │   Foliar Blade Segmentation    │
-                     │  (HSV + ExG + Inverse Otsu)    │
-                     └───────────────┬────────────────┘
-                                     │
-                 ┌───────────────────┴───────────────────┐
-                 │ Valid Mango Leaf Detected?            │
-                 ├───────────────────────────────────────┤
-                 │ NO  ──► Return Error JSON             │
-                 │         ("No mango leaf detected")    │
-                 │                                       │
-                 │ YES ──► Isolate Leaf Blade Mask       │
-                 └───────────────────┬───────────────────┘
-                                     ▼
-                     ┌────────────────────────────────┐
-                     │ Reject Paper / Hand / Desk /   │
-                     │ Soil / Ground Backgrounds      │
-                     └───────────────┬────────────────┘
-                                     ▼
-                     ┌────────────────────────────────┐
-                     │ Dual Deep CNN Consensus        │
-                     │ EfficientNet-B0 + MobileNetV3  │
-                     └───────────────┬────────────────┘
-                                     ▼
-                     ┌────────────────────────────────┐
-                     │ Region-Level Lesion Extraction │
-                     │ Spatial Leaf Boundary Check    │
-                     └───────────────┬────────────────┘
-                                     ▼
-                     ┌────────────────────────────────┐
-                     │ Single / Multi-Disease         │
-                     │ Diagnostic Aggregator          │
-                     └───────────────┬────────────────┘
-                                     ▼
-                     ┌────────────────────────────────┐
-                     │ REST API JSON Response         │
-                     │ + Agronomic Treatment Guidance │
-                     └────────────────────────────────┘
+                 ┌──────────────────────┐
+                 │     User Uploads     │
+                 │    Mango Leaf Image  │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │    React Frontend    │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │     REST API         │
+                 │   Python Backend     │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │     YOLOv8 Model     │
+                 │ Disease Detection &  │
+                 │    Localization      │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+              ┌────────────────────────────┐
+              │ Disease + Confidence +     │
+              │ Bounding Box Coordinates   │
+              └─────────────┬──────────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │    Frontend Result   │
+                 │   Visualization      │
+                 └──────────────────────┘
 ```
 
 ---
 
-## 📊 Model Benchmarks & Experimental Results
+## 📂 Project Structure
 
-### Dataset Partitioning (Zero Data Leakage)
-- **Training Set**: Exactly **300 images per class** (2,400 training images total, initialized with reproducible `seed=42`).
-- **Unseen Held-Out Test Set**: **1,579 images** reserved strictly for validation (186–200 unseen images per class).
-- **Multi-Disease Field Set**: **128 high-resolution field specimens** (1200×1600 / 1600×1200) exhibiting natural co-infections.
+```text
+Mango_Multiclass_Disease_Detection/
+│
+├── backend/
+│   ├── models/
+│   │   └── trained_model.pt
+│   │
+│   ├── routes/
+│   ├── services/
+│   ├── utils/
+│   ├── app.py
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── src/
+│   ├── public/
+│   ├── package.json
+│   └── ...
+│
+├── training/
+│   ├── train_yolov8.py
+│   ├── dataset.yaml
+│   └── ...
+│
+├── datasets/
+│   └── README.md
+│
+├── README.md
+└── .gitignore
+```
 
-### Quantitative Performance Matrix
-
-| Model Architecture | Epochs | Optimizer | Loss Schedule | Unseen Test Accuracy | Macro F1 |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **EfficientNet-B0** | 6 | AdamW | Cosine Annealing | **99.87%** | **0.9987** |
-| **MobileNetV3-Large** | 6 | AdamW | Cosine Annealing | **99.94%** | **0.9993** |
-| **Consensus Ensemble** | — | — | Softmax Average | **100.00%** | **1.0000** |
-| **YOLOv8 Detector** | 50 | AdamW | Cosine Annealing | **96.40% (mAP@50)** | **0.9460** |
-
-### Per-Class F1 Performance on Unseen Test Specimens
-
-| Botanical Class | EfficientNet-B0 | MobileNetV3-Large | Final Consensus Accuracy |
-| :--- | :---: | :---: | :---: |
-| **Anthracnose** | 99.73% | 99.73% | **100.0%** (30/30) |
-| **Bacterial Canker** | 100.00% | 100.00% | **100.0%** (30/30) |
-| **Cutting Weevil** | 100.00% | 100.00% | **100.0%** (30/30) |
-| **Die Back** | 99.74% | 99.74% | **100.0%** (30/30) |
-| **Gall Midge** | 99.75% | 100.00% | **100.0%** (30/30) |
-| **Healthy Foliage** | 100.00% | 100.00% | **100.0%** (30/30) |
-| **Powdery Mildew** | 100.00% | 100.00% | **100.0%** (30/30) |
-| **Sooty Mold** | 99.75% | 100.00% | **100.0%** (30/30) |
-
----
-
-## 📈 Research Paper Visual Charts (Google Colab)
-
-For publication in academic research papers (IEEE, Springer, Elsevier), see [model_code.md](model_code.md). It contains ready-to-run Google Colab code cells that generate all 300 DPI vector charts:
-
-1. 🥧 **Dataset Distribution Donut Chart** (Balanced 300 imgs/class)
-2. 🥧 **Multi-Disease Co-Infection Breakdown Pie Chart** (128 field specimens)
-3. 📊 **Model Benchmark Comparison Grouped Bar Chart**
-4. 📊 **Per-Class F1-Score Breakdown Bar Chart**
-5. 📈 **Training Loss Convergence Curves** (EfficientNet-B0 with Cosine Annealing)
-6. 🟩 **8x8 Confusion Matrix Heatmap** (Unseen test split)
-7. 🖼️ **Boundary-Constrained Lesion Localization Overlay Demo**
-8. 🟡 **4-Stage Background Rejection Visual Diagram**
+> The exact folder structure may differ depending on the current project implementation.
 
 ---
 
-## 🚀 Quick Start Guide
+# 🧪 Dataset
 
-### Prerequisites
-- Python 3.10+
-- Node.js 18+ and npm
+The project uses an **annotated mango leaf dataset prepared for YOLO object detection**.
+
+Each training image is associated with YOLO-format annotations containing:
+
+```text
+class_id center_x center_y width height
+```
+
+All bounding-box coordinates are normalized between `0` and `1`.
+
+### Dataset preparation includes:
+
+* Image validation
+* Annotation validation
+* Class ID verification
+* Bounding-box validation
+* Duplicate checking
+* Corrupted-image checking
+* Train/validation/test splitting
+* Class distribution analysis
+
+### Important
+
+The project may contain additional datasets such as Kaggle data or previous experimental datasets.
+
+These datasets are **not automatically considered for the current training pipeline**.
+
+The active training pipeline should use only the **verified YOLO-annotated dataset**.
+
+Other datasets are retained for reference/backup and are excluded from the current training process.
 
 ---
 
-### Step 1: Clone Repository & Start Backend Server
+# 🏷️ YOLO Annotation Format
 
-```powershell
-# Clone the repository
+Each image has a corresponding `.txt` annotation file.
+
+Example:
+
+```text
+image_001.jpg
+image_001.txt
+```
+
+Example annotation:
+
+```text
+0 0.512 0.438 0.274 0.316
+1 0.721 0.604 0.182 0.221
+```
+
+Each row represents:
+
+```text
+class_id
+center_x
+center_y
+width
+height
+```
+
+For a multi-disease leaf, multiple annotation rows can represent different disease regions.
+
+---
+
+# 🧠 Model
+
+## YOLOv8
+
+The primary detection model is **YOLOv8** from Ultralytics.
+
+YOLOv8 performs:
+
+* Object detection
+* Disease classification
+* Disease localization
+* Multi-object detection in a single image
+
+For example, if a leaf contains two genuinely annotated disease regions, the model can return:
+
+```text
+Disease A
+Confidence: 91%
+Bounding Box: (...)
+
+Disease B
+Confidence: 87%
+Bounding Box: (...)
+```
+
+The model should not force a disease prediction when there is no valid detection.
+
+---
+
+# 🔬 Training
+
+The model can be trained using Google Colab or another GPU-enabled environment.
+
+Typical training workflow:
+
+```text
+Dataset
+   ↓
+Annotation Validation
+   ↓
+Train / Validation / Test Split
+   ↓
+YOLOv8 Training
+   ↓
+Validation
+   ↓
+Model Evaluation
+   ↓
+Best Model (.pt)
+   ↓
+Backend Inference
+```
+
+Example training command:
+
+```bash
+yolo detect train \
+    data=dataset.yaml \
+    model=yolov8n.pt \
+    epochs=100 \
+    imgsz=640 \
+    batch=16
+```
+
+The exact training parameters should be adjusted according to dataset size and available GPU resources.
+
+---
+
+# 📊 Model Evaluation
+
+The model should be evaluated using:
+
+* Precision
+* Recall
+* mAP@50
+* mAP@50-95
+* Confusion matrix
+* Per-class performance
+* Validation loss
+* Test-set predictions
+
+Example evaluation:
+
+```bash
+yolo detect val \
+    model=best.pt \
+    data=dataset.yaml
+```
+
+A confusion matrix should be reviewed to identify whether one disease is being incorrectly predicted more frequently than other classes.
+
+---
+
+# ⚠️ Preventing Model Bias
+
+A major focus of the training pipeline is preventing the model from becoming biased toward a single disease class.
+
+Before training, the dataset should be checked for:
+
+* Severe class imbalance
+* Incorrect class IDs
+* Incorrect annotations
+* Duplicate images
+* Data leakage
+* Corrupted images
+* Empty annotation files
+* Incorrect bounding boxes
+* Inconsistent class names
+
+For example, if the model predicts **Anthracnose for almost every image**, the dataset and training pipeline must be investigated before deploying the model.
+
+The solution should not simply force another prediction or hardcode a class.
+
+---
+
+# 🖥️ Web Application
+
+The web application allows users to upload a mango leaf image and receive detection results.
+
+### Workflow
+
+```text
+Upload Image
+     ↓
+Backend API
+     ↓
+YOLOv8 Inference
+     ↓
+Disease Detection
+     ↓
+Bounding Box Localization
+     ↓
+Confidence Calculation
+     ↓
+Result Display
+```
+
+The frontend visualizes the detected disease regions directly on the uploaded image.
+
+---
+
+# 🔌 API
+
+The backend exposes an API for image prediction.
+
+Example request:
+
+```http
+POST /predict
+Content-Type: multipart/form-data
+```
+
+Example response:
+
+```json
+{
+  "predictions": [
+    {
+      "disease": "Anthracnose",
+      "confidence": 0.91,
+      "bbox": [120, 85, 310, 270]
+    }
+  ]
+}
+```
+
+The exact response structure depends on the current backend implementation.
+
+---
+
+# 🛠️ Local Setup
+
+## 1. Clone Repository
+
+```bash
 git clone https://github.com/adityayadvv45/Mango_Multiclass_Disease_Detection.git
-cd MangoLeaf
-
-# Start the FastAPI Backend Server (Terminal 1)
-.\backend\.venv\Scripts\python.exe backend\main.py
+cd Mango_Multiclass_Disease_Detection
 ```
-
-* Backend API: `http://localhost:8000`
-* Interactive Swagger Docs: `http://localhost:8000/docs`
 
 ---
 
-### Step 2: Start the React Frontend
+## 2. Backend Setup
 
-Open a second terminal window in the project root:
+```bash
+cd backend
+```
 
-```powershell
-# Install frontend dependencies (first time only)
+Create a virtual environment:
+
+```bash
+python -m venv .venv
+```
+
+Activate it on Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Run the backend:
+
+```bash
+python app.py
+```
+
+---
+
+## 3. Frontend Setup
+
+Open another terminal:
+
+```bash
+cd frontend
 npm install
-
-# Start Vite Development Server (Terminal 2)
 npm run dev
 ```
 
-* Open your browser at: `http://localhost:5173`
+The frontend will then be available at the local development URL shown by Vite.
 
 ---
 
-## 🧪 Automated Testing & Verification
+# ☁️ Deployment
 
-Run the test suites to verify ML inference, background rejection, and API integrity:
+The project uses a separate frontend and backend architecture.
 
-```powershell
-# Run the complete Inference & Background Rejection Verification
-.\backend\.venv\Scripts\python.exe backend\tests\test_inference.py
+### Frontend
 
-# Run the FastAPI Integration Tests
-.\backend\.venv\Scripts\python.exe backend\tests\test_api.py
-```
+Deployed using:
 
----
+**Netlify**
 
-## 📡 API Reference
+Project:
 
-### 1. Leaf Disease Diagnosis
-- **Endpoint**: `POST /predict`
-- **Content-Type**: `multipart/form-data`
-- **Parameters**: `file` (Image: JPEG, PNG, WEBP)
+https://mango-multiclass-detection-system.netlify.app/
 
-#### Example Response:
-```json
-{
-  "success": true,
-  "leaf_detected": true,
-  "id": "pred_1774050212000",
-  "isMultiPathology": true,
-  "disease": "Anthracnose + Powdery Mildew",
-  "primaryDiseaseName": "Anthracnose",
-  "confidence": 98.6,
-  "status": "Multiple Diseases Detected",
-  "risk": "High",
-  "riskColor": "rose",
-  "detectedDiseases": [
-    {
-      "name": "Anthracnose",
-      "scientificName": "Colletotrichum gloeosporioides",
-      "severityLevel": "4 / 5 (Severe)"
-    },
-    {
-      "name": "Powdery Mildew",
-      "scientificName": "Oidium mangiferae",
-      "severityLevel": "3 / 5 (Moderate)"
-    }
-  ],
-  "regions": [
-    {
-      "id": 1,
-      "disease": "Anthracnose",
-      "confidence": 96.4,
-      "normBox": { "top": 32.5, "left": 41.2, "width": 24.0, "height": 18.5 }
-    }
-  ],
-  "inferenceTimeMs": 48
-}
-```
+### Backend
 
-### 2. System Health & Loaded Models
-- **Endpoint**: `GET /health`
-```json
-{
-  "status": "healthy",
-  "loaded_models": ["EfficientNet-B0", "MobileNetV3-Large"],
-  "classes_count": 8,
-  "classes": ["Anthracnose", "Bacterial Canker", "Cutting Weevil", "Die Back", "Gall Midge", "Healthy", "Powdery Mildew", "Sooty Mold"]
-}
-```
+Deployed using:
 
-### 3. Botanical Classes & Etiology Metadata
-- **Endpoint**: `GET /classes`
+**Render**
+
+Backend:
+
+https://mango-multiclass-disease-detection-4.onrender.com/
 
 ---
 
-## 📁 Repository Structure
+# 🔮 Future Improvements
 
-```text
-MangoLeaf/
-├── backend/
-│   ├── data/                   # Mango Leaf dataset (single & multi-disease)
-│   ├── models/                 # Exported PyTorch model bundle (.pth)
-│   ├── tests/                  # Automated API & ML test suites
-│   │   ├── test_api.py         # FastAPI REST integration test suite
-│   │   └── test_inference.py   # Complete inference & segmentation test suite
-│   ├── training/               # Clean training pipelines
-│   │   ├── train_pipeline.py   # Dual-backbone CNN training pipeline
-│   │   └── train_yolo.py       # YOLOv8 lesion detector training script
-│   ├── inference.py            # Singleton inference & lesion localization engine
-│   ├── main.py                 # FastAPI application server
-│   ├── models.py               # CNN architecture definitions & botanical metadata
-│   ├── requirements.txt        # Backend dependencies
-│   └── segmentation.py         # Leaf segmentation & background rejection engine
-├── src/
-│   ├── components/             # React UI components (Upload, Results, Overlays)
-│   ├── data/                   # Botanical disease etiology & sample presets
-│   ├── pages/                  # Application views (Home, Detection, Diseases, About)
-│   ├── services/               # API integration client
-│   ├── App.jsx                 # Top-level React routing
-│   └── main.jsx                # Application bootstrap
-├── public/                     # Static assets and specimen samples
-├── Dockerfile                  # Production container configuration
-├── render.yaml                 # Cloud deployment configuration
-├── model_code.md               # Google Colab ready research paper code & charts
-├── package.json                # Frontend dependencies & scripts
-├── requirements.txt            # Root dependencies
-├── vite.config.js              # Vite bundler configuration
-└── README.md                   # Project documentation
-```
+Possible future improvements include:
+
+* Larger and more diverse real-world datasets
+* Improved multi-disease detection
+* Better class balancing
+* More robust validation datasets
+* Disease severity estimation
+* Leaf segmentation
+* Mobile application
+* Offline inference
+* Explainable AI using Grad-CAM or similar techniques
+* Continuous model evaluation with new field images
 
 ---
 
-## 🛡️ Botanical Disease Reference
+# 🎯 Applications
 
-| Disease | Pathogen | Visual Signs | Key Agronomic Action |
-| :--- | :--- | :--- | :--- |
-| **Anthracnose** | *Colletotrichum gloeosporioides* | Dark brown necrotic patches, shot-hole perforations | Apply copper oxychloride (0.3%) or azoxystrobin spray. |
-| **Bacterial Canker** | *Xanthomonas campestris* | Water-soaked angular lesions with bright yellow halos | Apply Streptocycline (100 ppm) + Copper Oxychloride (0.2%). |
-| **Cutting Weevil** | *Deporaus marginatus* | Clean transverse razor-like cuts across leaf blade | Destroy severed leaf tips; apply foliar neem oil (5ml/L). |
-| **Die Back** | *Lasiodiplodia theobromae* | Leaf apex browning, twigs drying downwards | Prune infected twigs 2–3 inches into green wood; apply Bordeaux paste. |
-| **Gall Midge** | *Procontarinia matteiana* | Raised wart-like pimple galls scattered on leaves | Spray systemic insecticide (Imidacloprid 17.8 SL); rake orchard soil. |
-| **Powdery Mildew** | *Oidium mangiferae* | White/grayish powdery coating, leaf curling | Spray wettable sulfur (0.2%) or hexaconazole (0.1%). |
-| **Sooty Mold** | *Capnodium mangiferae* | Superficial velvety charcoal-black crust | Control sucking pests (mealybugs/hoppers); spray 2% starch solution. |
-| **Healthy** | *None* | Vibrant green, intact cuticle, no lesions | Maintain balanced seasonal NPK (8:4:8) and drip irrigation. |
+This system can potentially assist with:
 
----
+* Agricultural disease screening
+* Mango crop monitoring
+* Early disease identification
+* Research in agricultural computer vision
+* Smart agriculture applications
+* Automated plant disease analysis
 
-## 📜 Citation
-
-```bibtex
-@article{mangoguard2026,
-  title={Real-Time Multi-Pathology Mango Leaf Disease Detection and Lesion Localization via Foliar Boundary-Constrained Deep Neural Ensembles},
-  author={Yadav, Aditya and Contributors},
-  journal={Agricultural Vision & Plant Pathology Deep Learning},
-  year={2026},
-  url={https://github.com/adityayadvv45/Mango_Multiclass_Disease_Detection}
-}
-```
+The system is intended as an **AI-assisted detection tool**, not a replacement for expert agricultural diagnosis.
 
 ---
 
-## 📄 License
+# 👨‍💻 Author
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+**Aditya Yadav**
+
+B.Tech Computer Science & Engineering
+
+GitHub:
+https://github.com/adityayadvv45
+
+Portfolio:
+https://aditya-portfolio-8zfw.vercel.app/
+
+LinkedIn:
+https://www.linkedin.com/in/aditya-yadav-289b132b3/
+
+---
+
+# 📄 License
+
+This project is intended for educational, research, and demonstration purposes.
+
